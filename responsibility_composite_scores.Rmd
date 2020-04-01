@@ -1,0 +1,36 @@
+---
+title: "Financial Responsibility Composite Scores"
+author: "Jason P. Casey"
+date: 2020-04-01
+output: html_notebook
+---
+
+```{r setup}
+# load libraries
+library(knitr)
+library(lubridate)
+library(tidyverse)
+
+# set default document options
+knitr::opts_chunk$set(fig.width = 8,
+                      fig.asp = 0.618,
+                      echo = TRUE,
+                      warning = FALSE)
+
+# set random seed
+set.seed(1965)
+```
+
+# Load Data
+
+```{r}
+scores <-
+  read_csv('data/fin_resp_data.csv',
+           col_types = cols(.default = col_character(),
+                            composite_year = col_integer(),
+                            composite_score = col_double(),
+                            unitid = col_integer()))
+
+scores
+```
+
