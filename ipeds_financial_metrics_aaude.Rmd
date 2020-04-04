@@ -1,0 +1,124 @@
+---
+title: "IPEDS Financial Metrics"
+subtitle: "AAUDE Data"
+author: "Jason P. Casey"
+date: 2020-04-03
+output: html_notebook
+params:
+  year:
+    value: 2018
+---
+
+# Setup
+
+```{r setup}
+# libraries
+library(knitr)
+library(DBI)
+library(odbc)
+library(keyring)
+library(reticulate)
+library(lubridate)
+library(dbplyr)
+library(tidyverse)
+
+# set default document options
+knitr::opts_chunk$set(fig.width = 8,
+                      fig.asp = 0.618,
+                      echo = TRUE,
+                      warning = FALSE)
+knitr::knit_engines$set(python = reticulate::eng_python)
+
+# set random seed
+set.seed(1965)
+
+# get parameter value
+year_value <- params$year - 15
+```
+
+# Load Tables
+
+## Load AAUDE Data From MIT Warehouse
+
+Load needed AAUDE DW tables.  These include FISCAL_YEAR, INSTITUTION, IPEDS_FINANCE_FIELD, and IPEDS_FINANCE_FASB_DETAIL.
+
+```{r}
+# Open a connection
+connection <- DBI::dbConnect(odbc::odbc(),
+                             # Driver = "Oracle 18 ODBC driver",
+                             "aaude",
+                             UID = keyring::key_get("aaude_user"),
+                             PWD = keyring::key_get("mit_secret"))
+
+
+fiscal_years <-
+  tbl(connection, in_schema('WAREUSER', 'FISCAL_YEAR')) %>%
+  rename_all(tolower) %>%
+  filter(fiscal_year_key > year_value) %>%
+  select(-warehouse_load_date,
+         -begin_date,
+         -end_date)
+
+institutions <-
+  tbl(connection, in_schema('WAREUSER', 'INSTITUTION')) %>%
+  rename_all(tolower) %>%
+  select(institution_key,
+         inst_full_name,
+         city,
+         state_code,
+         carnegie_class_code,
+         carnegie_class_desc,
+         control,
+         longitude,
+         latitude) %>%
+  mutate(longitude = as.numeric(longitude),
+         latitude = as.numeric(latitude))
+
+finance_fields <-
+  tbl(connection, in_schema('WAREUSER', 'IPEDS_FINANCE_FIELD')) %>%
+  rename_all(tolower) %>%
+  # filter(ipeds_finance_field_code %in% c('F2E087', 'F2E135', 'F2B02', 'F2C06', 'F2C10',
+  #                                        'F2B01', 'F2A18', 'F2A17', 'F2A03A',
+  #                                        'F2H01', 'F2H02', 'F2D01')) %>%
+  select(-warehouse_load_date)
+
+metric_data <-
+  tbl(connection, in_schema('WAREUSER', 'IPEDS_FINANCE_FASB_DETAIL')) %>%
+  rename_all(tolower) %>%
+  select(-warehouse_load_date) %>%
+  inner_join(fiscal_years, by = 'fiscal_year_key') %>%
+  inner_join(institutions, by = 'institution_key') %>%
+  inner_join(finance_fields, by = 'ipeds_finance_field_key') %>%
+  collect()
+
+# close connections
+dbDisconnect(connection)
+
+# housekeeping
+rm(connection, fiscal_years, institutions, finance_fields)
+```
+
+# Inspect
+
+```{r}
+metric_data %>%
+  distinct(ipeds_finance_field_code, ipeds_finance_field_name) %>%
+  arrange(ipeds_finance_field_code)
+```
+
+# Calculate Metrics
+
+```{r}
+metric_data %>%
+  select(fiscal_year, institution_key, inst_full_name, city, state_code, carnegie_class_code,
+         carnegie_class_desc, control, longitude, latitude, ipeds_finance_field_code, amount) %>%
+  filter(ipeds_finance_field_code %in% c('F2D01', 'F2B02', 'F2D16', 'F2C06', 'F2H01', 'F2H02', 'F2E081')) %>%
+  pivot_wider(names_from = ipeds_finance_field_code, values_from = amount) %>%
+  mutate(margin = F2D16 - F2B02,
+         gross_tuition = F2D01 + F2E081,
+         tuition_dependence = gross_tuition / F2D16,
+         unfunded_discount_rate = F2C06 / gross_tuition) %>%
+  filter(state_code %in% c('NE', 'IA', 'MO', 'KS', 'SD'))
+```
+
+
