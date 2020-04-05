@@ -42,3 +42,4 @@ vignettes/*.pdf
 *.html
 ipeds_metrics.csv
 reduced_fields.csv
+.DS_Store
