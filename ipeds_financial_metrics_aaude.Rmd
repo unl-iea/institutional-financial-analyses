@@ -1,15 +1,17 @@
 ---
-title: "IPEDS Financial Metrics"
+title: "IPEDS College Risk Scores"
 subtitle: "AAUDE Data"
 author: "Jason P. Casey"
-date: 2020-04-03
+date: 2020-04-05
 output: html_notebook
 params:
   year:
-    value: 2018
+    value: 2016
 ---
 
-# Setup
+# Introduction
+
+This workbook uses IPEDS Data to estimate College Stress Scores, per Zemsky, Shaman, and Baldridge.
 
 ```{r setup}
 # libraries
@@ -33,19 +35,24 @@ knitr::knit_engines$set(python = reticulate::eng_python)
 set.seed(1965)
 
 # get parameter value
-year_value <- params$year - 15
+year_value <- params$year - 7
 ```
 
 # Load Tables
 
 ## Load AAUDE Data From MIT Warehouse
 
-Load needed AAUDE DW tables.  These include FISCAL_YEAR, INSTITUTION, IPEDS_FINANCE_FIELD, and IPEDS_FINANCE_FASB_DETAIL.
+Load needed data from AAUDE DW tables.  These include:
+
+Entity | IPEDS Section | Field(s)
+-------|---------------|---------
+Total Expenses | F2 (FASB) | F2B02
+Hospital Expenses | F2 (FASB) | F2E092, F2E093, F2E094, F2E094, F2E095, F2E096, F2E097, F2E09X
+
 
 ```{r}
 # Open a connection
 connection <- DBI::dbConnect(odbc::odbc(),
-                             # Driver = "Oracle 18 ODBC driver",
                              "aaude",
                              UID = keyring::key_get("aaude_user"),
                              PWD = keyring::key_get("mit_secret"))
@@ -59,6 +66,27 @@ fiscal_years <-
          -begin_date,
          -end_date)
 
+finance_fields <-
+  tbl(connection, in_schema('WAREUSER', 'IPEDS_FINANCE_FIELD')) %>%
+  rename_all(tolower) %>%
+  filter(ipeds_finance_field_code %in% c('F2B02', 'F2E092', 'F2E093', 'F2E094',
+                                         'F2E095', 'F2E096', 'F2E097', 'F2E09X',
+                                         'F2H02')) %>%
+  select(-warehouse_load_date)
+
+fasb_data <-
+  tbl(connection, in_schema('WAREUSER', 'IPEDS_FINANCE_FASB_DETAIL')) %>%
+  rename_all(tolower) %>%
+  inner_join(fiscal_years, by = 'fiscal_year_key') %>%
+  inner_join(finance_fields, by = 'ipeds_finance_field_key') %>%
+  select(fiscal_year_key,
+         fiscal_year,
+         institution_key,
+         ipeds_finance_field_code,
+         ipeds_finance_field_name,
+         amount) %>%
+  collect()
+
 institutions <-
   tbl(connection, in_schema('WAREUSER', 'INSTITUTION')) %>%
   rename_all(tolower) %>%
@@ -68,40 +96,26 @@ institutions <-
          state_code,
          carnegie_class_code,
          carnegie_class_desc,
+         highest_deg_granted_code,
+         highest_deg_granted_desc,
          control,
          longitude,
          latitude) %>%
+  collect() %>%
   mutate(longitude = as.numeric(longitude),
          latitude = as.numeric(latitude))
-
-finance_fields <-
-  tbl(connection, in_schema('WAREUSER', 'IPEDS_FINANCE_FIELD')) %>%
-  rename_all(tolower) %>%
-  # filter(ipeds_finance_field_code %in% c('F2E087', 'F2E135', 'F2B02', 'F2C06', 'F2C10',
-  #                                        'F2B01', 'F2A18', 'F2A17', 'F2A03A',
-  #                                        'F2H01', 'F2H02', 'F2D01')) %>%
-  select(-warehouse_load_date)
-
-metric_data <-
-  tbl(connection, in_schema('WAREUSER', 'IPEDS_FINANCE_FASB_DETAIL')) %>%
-  rename_all(tolower) %>%
-  select(-warehouse_load_date) %>%
-  inner_join(fiscal_years, by = 'fiscal_year_key') %>%
-  inner_join(institutions, by = 'institution_key') %>%
-  inner_join(finance_fields, by = 'ipeds_finance_field_key') %>%
-  collect()
 
 # close connections
 dbDisconnect(connection)
 
 # housekeeping
-rm(connection, fiscal_years, institutions, finance_fields)
+rm(connection, fiscal_years, finance_fields)
 ```
 
 # Inspect
 
 ```{r}
-metric_data %>%
+fasb_data %>%
   distinct(ipeds_finance_field_code, ipeds_finance_field_name) %>%
   arrange(ipeds_finance_field_code)
 ```
@@ -109,16 +123,25 @@ metric_data %>%
 # Calculate Metrics
 
 ```{r}
-metric_data %>%
-  select(fiscal_year, institution_key, inst_full_name, city, state_code, carnegie_class_code,
-         carnegie_class_desc, control, longitude, latitude, ipeds_finance_field_code, amount) %>%
-  filter(ipeds_finance_field_code %in% c('F2D01', 'F2B02', 'F2D16', 'F2C06', 'F2H01', 'F2H02', 'F2E081')) %>%
-  pivot_wider(names_from = ipeds_finance_field_code, values_from = amount) %>%
-  mutate(margin = F2D16 - F2B02,
-         gross_tuition = F2D01 + F2E081,
-         tuition_dependence = gross_tuition / F2D16,
-         unfunded_discount_rate = F2C06 / gross_tuition) %>%
-  filter(state_code %in% c('NE', 'IA', 'MO', 'KS', 'SD'))
+hospitals <-
+  fasb_data %>%
+  select(fiscal_year, institution_key, ipeds_finance_field_code, amount) %>%
+  filter(ipeds_finance_field_code %in% c('F2E092', 'F2E093', 'F2E094', 'F2E095',
+                                         'F2E096', 'F2E097', 'F2E09X')) %>%
+  group_by(fiscal_year, institution_key) %>%
+  summarize(hospital_exp = sum(amount, na.rm = TRUE))
+
+fasb_metrics <-
+  fasb_data %>%
+  select(fiscal_year_key, fiscal_year, institution_key, ipeds_finance_field_code, amount) %>%
+  filter(ipeds_finance_field_code %in% c('F2B02', 'F2H02')) %>%
+  pivot_wider(names_from = 'ipeds_finance_field_code', values_from = 'amount') %>%
+  rename(total_exp = F2B02,
+         endowment_eoy = F2H02) %>%
+  inner_join(hospitals, by = c('fiscal_year', 'institution_key')) %>%
+  mutate(`Endowment/Expenses Net of Hospital` = endowment_eoy / (total_exp - hospital_exp))
+
+fasb_metrics
 ```
 
 
