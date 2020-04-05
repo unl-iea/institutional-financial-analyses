@@ -38,5 +38,7 @@ vignettes/*.pdf
 # R Environment Variables
 .Renviron
 
+# user added
 *.html
 ipeds_metrics.csv
+reduced_fields.csv
