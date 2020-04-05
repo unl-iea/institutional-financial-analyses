@@ -179,7 +179,7 @@ system.time({
   fields <-
     read_csv('data/ipeds_f2_fields.csv',
              col_types = cols(.default = col_character())) %>%
-    select(-starts_with('x'))
+    filter(str_sub(field_code, 1, 1) != 'x')
  
   # reduce to single label per code, last one in wins 
   fields <-
