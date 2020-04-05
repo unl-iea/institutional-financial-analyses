@@ -1,5 +1,5 @@
 ---
-title: "IPEDS College Risk Scores"
+title: "IPEDS College Stress Scores"
 subtitle: "AAUDE Data"
 author: "Jason P. Casey"
 date: 2020-04-05
