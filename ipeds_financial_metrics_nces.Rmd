@@ -178,7 +178,27 @@ system.time({
 system.time({
   fields <-
     read_csv('data/ipeds_f2_fields.csv',
-             col_types = cols(.default = col_character()))
+             col_types = cols(.default = col_character())) %>%
+    select(-starts_with('x'))
+ 
+  # reduce to single label per code, last one in wins 
+  fields <-
+    fields %>%
+    group_by(field_code) %>%
+    summarize(fiscal_year = max(fiscal_year)) %>%
+    ungroup() %>%
+    inner_join(fields, by = c('fiscal_year', 'field_code')) %>%
+    select(-fiscal_year)
+})
+```
+
+### Output Reduced Fields File
+
+```{r}
+system.time({
+  fields %>%
+    write_csv('data/reduced_fields.csv',
+              na = '')
 })
 ```
 
