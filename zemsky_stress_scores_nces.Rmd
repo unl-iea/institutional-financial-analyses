@@ -2,11 +2,11 @@
 title: "IPEDS Financial Metrics"
 subtitle: "NCES Data Files"
 author: "Jason P. Casey"
-date: 2020-04-03
+date: 2020-04-05
 output: html_notebook
 params:
   year:
-    value: 2018
+    value: 2016
 ---
 
 ```{r setup}
@@ -55,12 +55,71 @@ net_load_zip <- function(file_url, file_name)
 
 # base tibble
 years <-
-  tibble(`Fiscal Year` = seq(params$year - 4, params$year))
+  tibble(`Fiscal Year` = seq(params$year - 7, params$year))
 ```
 
 # Read Data
 
-## IPEDS Institutions
+## GDP Deflators
+
+```{r}
+system.time({
+  gdp <-
+    read_csv('data/GDPDEF.csv',
+             col_types = cols(.default = col_double(),
+                              date = col_character())) %>%
+    filter(str_sub(date, 1, 3) == '10/') %>%
+    mutate(`Fiscal Year` = as.integer(str_sub(date, -2, -1)),
+           `Fiscal Year` = ifelse(`Fiscal Year` < 47,
+                                  2000 + `Fiscal Year`,
+                                  1900 + `Fiscal Year`),
+           GDP = gdpdef / 100) %>%
+    select(`Fiscal Year`,
+           GDP)
+})
+```
+
+## Financial Responsibility Composite Scores
+
+```{r}
+system.time({
+  scores <-
+    read_csv('data/fin_resp_data.csv',
+             col_types = cols(.default = col_character(),
+                              composite_year = col_integer(),
+                              composite_score = col_double())) %>%
+    mutate(`Fiscal Year` = composite_year + 1) %>%
+    select(unitid,
+           `Fiscal Year`,
+           `Composite Score` = composite_score)
+})
+```
+
+## IPEDS Data
+
+### IC Fields
+
+```{r}
+# access data via net
+load_ic <- function(year)
+{
+  url <- str_c('https://nces.ed.gov/ipeds/datacenter/data/IC', year - 1, '.zip')
+  name <- str_c('ic', year - 1, '.csv')
+  
+  net_load_zip(url, name) %>%
+    rename_all(tolower)
+}
+
+system.time({
+  ic_data <-
+    years %>%
+    mutate(data = map(`Fiscal Year`, load_ic)) %>%
+    unnest(cols = data) %>%
+    select(unitid, `Fiscal Year`, level5, distnced)
+})
+```
+
+### HD Fields
 
 ```{r}
 # access data via net
@@ -83,7 +142,12 @@ load_hd <- function(year)
                                  NA),
            `Close Date` = ifelse(closedat == '-2',
                                  NA,
-                                 closedat)) %>%
+                                 closedat),
+           opeflag = as.integer(opeflag),
+           obereg = as.integer(obereg)) %>%
+    filter(obereg < 9,
+           opeflag == 1,
+           Control %in% c('Public', 'Private')) %>%
     select(unitid,
            opeid,
            `Institution Name` = instnm,
@@ -107,52 +171,38 @@ system.time({
     summarize(`Fiscal Year` = max(`Fiscal Year`)) %>%
     ungroup() %>%
     inner_join(institutions, by = c('unitid', 'Fiscal Year')) %>%
-    select(-`Fiscal Year`) %>%
+    inner_join(ic_data, by = c('unitid', 'Fiscal Year')) %>%
+    mutate(distnced = ifelse(is.na(distnced), 0, as.integer(distnced)),
+           level5 = ifelse(is.na(level5), 0, as.integer(level5))) %>%
+    filter(distnced != 1,
+           level5 == 1) %>%
+    select(-`Fiscal Year`, -distnced, -level5) %>%
     mutate(`Close Date` = as_date(`Close Date`, tz = 'GMT', format='%m/%d/%Y'))
 })
+
+# housekeeping
+rm(ic_data)
 ```
 
-## IPEDS 12-Month Instructional Activity
+### IPEDS F2 Data Files
 
 ```{r}
-# access data via net
-load_efia <- function(year)
-{
-  url <- str_c('https://nces.ed.gov/ipeds/datacenter/data/efia', year, '.zip')
-  name <- str_c('efia', year, '.csv')
-  
-  net_load_zip(url, name) %>%
-    rename_all(tolower) %>%
-    replace_na(list(fteug = '0',
-                    ftegd = '0',
-                    ftedpp = '0')) %>%
-    mutate(fteug = as.numeric(fteug),
-           ftegd = as.numeric(ftegd),
-           ftedpp = as.numeric(ftedpp),
-           FTE = fteug + ftegd + ftedpp) %>%
-    select(unitid,
-           `Undergraduate FTE` = fteug,
-           `Graduate FTE` = ftegd,
-           `Prof Doctorate FTE` = ftedpp,
-           FTE)
-}
+# collapse year
+collapse_year <-
+  function(year) {
+    str_c(str_sub(year - 1, 3 ,4),
+          str_sub(year, 3 ,4))
+  }
 
-system.time({
-  fte <- 
-    years %>%
-    mutate(data = map(`Fiscal Year`, load_efia)) %>%
-    unnest(cols = data)
-})
-```
-
-## IPEDS F2 Data Files
-
-```{r}
 # access data via net
 load_fasb <- function(year)
 {
-  url <- str_c('https://nces.ed.gov/ipeds/datacenter/data/F', year - 2001, year - 2000, '_F2.zip')
-  name <- str_c('f', year - 2001, year - 2000, '_f2.csv')
+  url <- str_c('https://nces.ed.gov/ipeds/datacenter/data/F',
+               collapse_year(year),
+               '_F2.zip')
+  name <- str_c('f',
+                collapse_year(year),
+                '_f2.csv')
   
   net_load_zip(url, name) %>%
     rename_all(tolower) %>%
@@ -168,95 +218,61 @@ system.time({
   fasb_files <- 
     years %>%
     mutate(accounting_standard = 'FASB',
-           data = map(`Fiscal Year`, load_fasb))
+           data = map(`Fiscal Year`, load_fasb)) %>%
+    inner_join(gdp, by = c('Fiscal Year'))
 })
 ```
 
-## IPEDS Finance Field Labels
-
-```{r}
-system.time({
-  fields <-
-    read_csv('data/ipeds_f2_fields.csv',
-             col_types = cols(.default = col_character())) %>%
-    filter(str_sub(field_code, 1, 1) != 'x')
- 
-  # reduce to single label per code, last one in wins 
-  fields <-
-    fields %>%
-    group_by(field_code) %>%
-    summarize(fiscal_year = max(fiscal_year)) %>%
-    ungroup() %>%
-    inner_join(fields, by = c('fiscal_year', 'field_code')) %>%
-    select(-fiscal_year)
-})
-```
-
-### Output Reduced Fields File
-
-```{r}
-system.time({
-  fields %>%
-    write_csv('data/reduced_fields.csv',
-              na = '')
-})
-```
-
-# Financial Responsibility Composite Scores
-
-```{r}
-system.time({
-  scores <-
-    read_csv('data/fin_resp_data.csv',
-             col_types = cols(.default = col_character(),
-                              composite_year = col_integer(),
-                              composite_score = col_double())) %>%
-    mutate(`Fiscal Year` = composite_year + 1) %>%
-    select(unitid,
-           `Fiscal Year`,
-           `Composite Score` = composite_score)
-})
-```
-
-# Merge Files
+## Merge Files
 
 ```{r}
 metrics <-
   fasb_files %>%
   unnest(cols = data) %>%
-  inner_join(fields, by = 'field_code') %>%
-  filter(field_code %in% c('f2b01', 'f2b02', 'f2d01', 'f2a03a', 'f2a17',
-                           'f2a18', 'f2c05', 'f2c06', 'f2c08', 'f2c10',
-                           'f2d10', 'f2e135', 'f2h01', 'f2h02')) %>%
-  select(-accounting_standard, -field_code) %>%
-  pivot_wider(names_from = 'field_label',
-              values_from = 'amount',
-              values_fill = list(amount = 0)) %>%
-  inner_join(fte, by = c('unitid', 'Fiscal Year')) %>%
+  filter(field_code %in% c('f2e131', 'f2e091', 'f2h02')) %>%
+  pivot_wider(names_from = 'field_code',
+              values_from = 'amount') %>%
+  replace_na(replace=list(f2e131 = 0, f2e091 = 0, f2h02 = 0)) %>%
+  rename(`Accounting Standard` = accounting_standard,
+         `Endowment EOY` = f2h02,
+         `Total Expenses` = f2e131,
+         `Hospital Expenses` = f2e091) %>%
   left_join(scores, by = c('unitid', 'Fiscal Year')) %>%
   inner_join(institutions, ., by = c('unitid')) %>%
+  mutate(`Endowment/Expenses` = `Endowment EOY` / (`Total Expenses` - `Hospital Expenses`),
+         `Endowment/Expenses (Constant $)` = `Endowment/Expenses` / GDP) %>%
   rename(Unitid = unitid)
 
+rm(institutions, gdp, scores, fasb_files)
+```
+
+## Inspect Data
+
+```{r}
 metrics %>%
-  write_csv('data/ipeds_metrics.csv',
-            na = '')
+  filter(Control == 'Private',
+         is.na(`Endowment/Expenses`)) %>%
+  select(Unitid, `Institution Name`, `Fiscal Year`, City, State, `Endowment EOY`, `Total Expenses`)
 ```
 
 # Plots
 
 ```{r}
 metrics %>%
-  mutate(Margin = `Total revenues and investment return` - `Total expenses`,
-         `Margin per FTE (000)` = Margin / 1000 / FTE,
-         `Gross tuition` = `Tuition and fees - Total` + `Allowances applied to tuition and fees`,
-         `Tuition dependence` = `Tuition and fees - Total` / `Total revenues and investment return`,
-         `Discount rate` = `Allowances applied to tuition and fees` / `Gross tuition`,
-         `Unfunded discount rate` = `Institutional grants (unfunded)` / `Gross tuition`) %>%
-  filter(`Fiscal Year` == params$year,
-         Closed == 0) %>%
-  mutate(`Margin Group` = ifelse(`Margin per FTE (000)` > 0, 'Profitable', 'Unprofitable'),
-         `Margin Group` = ifelse(`Margin per FTE (000)` == 0, 'Even', `Margin Group`)) %>%
-  ggplot(aes(x = `Discount rate`, y = `Tuition dependence`, color = `Margin Group`)) +
+  mutate(Closed = factor(Closed)) %>%
+  ggplot(aes(x = `Composite Score`, y = `Endowment/Expenses (Constant $)`, color = Closed)) +
     geom_point(alpha = 1/5)
+```
+
+# Summary Statistics
+
+## Endowment/Expenses for Private Institutions
+
+```{r}
+metrics %>%
+  filter(Control == 'Private') %>%
+  group_by(`Fiscal Year`) %>%
+  summarize(`Mean Endowment/Expenses (Constant $)` = mean(`Endowment/Expenses`, na.rm = TRUE)) %>%
+  ungroup()
 ```
 
