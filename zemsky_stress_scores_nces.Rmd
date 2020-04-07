@@ -130,15 +130,13 @@ load_ic <- function(year)
   
   df <-
     net_load_zip(url, name) %>%
-    rename_all(tolower) %>%
-    mutate(level5 = as.integer(level5))
+    rename_all(tolower)
   
   if ('distnced' %in% colnames(df))
   {
     df <-
       df %>%
-      mutate(distance_ed = as.integer(distnced),
-             distance_ed = ifelse(distance_ed < 0, 0, distance_ed))
+      mutate(distance_ed = ifelse(distnced == '1', 1, 0))
   }
   else
   {
@@ -146,9 +144,7 @@ load_ic <- function(year)
   }
   
   df %>%
-    filter(level5 == 1,
-           distance_ed == 0) %>%
-    select(unitid, distance_ed)
+    select(unitid, distance_ed, ft_ug)
 }
 
 # access directory data via net
@@ -172,24 +168,20 @@ load_hd <- function(year)
            `Close Year` = ifelse(Closed == 1,
                                  deathyr,
                                  NA),
-           `Close Date` = ifelse(closedat == '-2',
-                                 NA,
-                                 closedat),
-           opeflag = as.integer(opeflag),
            obereg = as.integer(obereg)) %>%
-    filter(obereg < 9,
-           opeflag == 1,
-           Control %in% c('Public', 'Private')) %>%
     select(unitid,
            opeid,
            distance_ed,
+           obereg,
+           opeflag,
+           ft_ug,
+           deggrant,
            `Institution Name` = instnm,
            City = city,
            State = stabbr,
            Control,
            Closed,
-           `Close Year`,
-           `Close Date`)
+           `Close Year`)
 }
 
 system.time({
@@ -204,9 +196,13 @@ system.time({
     summarize(`Fiscal Year` = max(`Fiscal Year`)) %>%
     ungroup() %>%
     inner_join(institutions, by = c('unitid', 'Fiscal Year')) %>%
-    filter(distance_ed == 0) %>%
-    select(-`Fiscal Year`, -distance_ed) %>%
-    mutate(`Close Date` = as_date(`Close Date`, tz = 'GMT', format='%m/%d/%Y'))
+    filter(distance_ed == 0,
+           obereg < 9,
+           opeflag == '1',
+           deggrant == '1',
+           ft_ug == '1') %>%
+    select(-`Fiscal Year`, -distance_ed, -obereg, -opeflag, -deggrant, -ft_ug) # %>%
+    # mutate(`Close Date` = as_date(`Close Date`, tz = 'GMT', format='%m/%d/%Y'))
 })
 ```
 
