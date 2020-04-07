@@ -108,7 +108,10 @@ load_charges <- function(year)
   
   df <-
     net_load_zip(url, name) %>%
-    rename_all(tolower)
+    rename_all(tolower) %>%
+    mutate(in_state_tuition = as.numeric(tuition2),
+           out_state_tuition = as.numeric(tuition3)) %>%
+    select(unitid, in_state_tuition, out_state_tuition)
 }
 
 system.time({
@@ -259,6 +262,7 @@ metrics <-
          `Endowment EOY` = f2h02,
          `Total Expenses` = f2e131,
          `Hospital Expenses` = f2e091) %>%
+  inner_join(charges_data, by = c('unitid', 'Fiscal Year')) %>%
   left_join(scores, by = c('unitid', 'Fiscal Year')) %>%
   inner_join(institutions, ., by = c('unitid')) %>%
   mutate(`Endowment/Expenses` = `Endowment EOY` / (`Total Expenses` - `Hospital Expenses`),
