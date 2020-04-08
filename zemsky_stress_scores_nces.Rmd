@@ -418,8 +418,8 @@ system.time({
            `Accounting Standard` == 'FASB') %>%
     group_by(Unitid) %>%
     mutate(`Market Price Change` = (`Market Price` - lag(`Market Price`, 7)) / lag(`Market Price`, 7),
-           `Market Price Alert` = ifelse(`Market Price Change` <= -0.104, 1, 0),
-           `Market Price Warning` = ifelse(`Market Price Change` <= -0.175, 1, 0),
+           `Market Price Alert` = ifelse(`Market Price Change` <= -0.0, 1, 0),
+           `Market Price Warning` = ifelse(`Market Price Change` <= -0.083, 1, 0),
            `Endowment/Expenses Change` = (`Endowment/Expenses` - lag(`Endowment/Expenses`, 7)) / lag(`Endowment/Expenses`, 7),
            `Endowment/Expenses Alert` = ifelse(`Endowment/Expenses Change` <= 0.0, 1, 0),
            `Endowment/Expenses Warning` = ifelse(`Endowment/Expenses Change` <= -0.103, 1, 0),
@@ -444,11 +444,11 @@ system.time({
            `Endowment/Expenses Alert` = ifelse(`Endowment/Expenses Change` <= 0.0, 1, 0),
            `Endowment/Expenses Warning` = ifelse(`Endowment/Expenses Change` <= -0.103, 1, 0),
            `Retention Change` = (Retention - lag(Retention, 7)) / lag(Retention, 7),
-           `Retention Alert` = ifelse(`Retention Change` <= 0.0, 1, 0),
-           `Retention Warning` = ifelse(`Retention Change` <= -0.083, 1, 0),
+           `Retention Alert` = ifelse(`Retention Change` <= 0.656, 1, 0),
+           `Retention Warning` = ifelse(`Retention Change` <= 0.564, 1, 0),
            `Enrollment Change` = (`UG First-time First Year Enrollment` - lag(`UG First-time First Year Enrollment`, 7)) / lag(`UG First-time First Year Enrollment`, 7),
-           `Enrollment Alert` = ifelse(`Enrollment Change` <= 0.0, 1, 0),
-           `Enrollment Warning` = ifelse(`Enrollment Change` <= -0.083, 1, 0)) %>%
+           `Enrollment Alert` = ifelse(`Enrollment Change` <= 0.174, 1, 0),
+           `Enrollment Warning` = ifelse(`Enrollment Change` <= 0.308, 1, 0)) %>%
     ungroup() %>%
     bind_rows(stress_scores) %>%
     filter(`Fiscal Year` == params$year) %>%
@@ -504,6 +504,68 @@ system.time({
   
   rm(stress_summary)
 })
+```
+
+## Estimate Institutional Extrapolation Models
+
+```{r}
+coef_helper <- function(td) as_tibble(t(deframe(td)))
+
+get_coefs <-
+  function(fml, df) {
+    df %>%
+      group_by(Unitid) %>%
+      nest() %>%
+      mutate(fit = map2(fml, data, run_model),
+             td = map(fit, tidy),
+             coef = map(td, coef_helper)) %>%
+      select(Unitid, coef) %>%
+      unnest(cols = coef) %>%
+      rename(Intercept = `(Intercept)`,
+             Slope = Index)
+  }
+
+df <-
+  metrics %>%
+  filter(`Accounting Standard` == 'FASB')
+
+metric_parameters <-
+  tribble(~Metric,
+          'UG First-time First Year Enrollment',
+          'Retention',
+          'Endowment/Expenses',
+          'Market Price') %>%
+  mutate(formula = str_c('`', Metric, '` ~ Index'),
+         model = map2(formula, list(df), get_coefs)) %>%
+  unnest(cols = model)
+
+df <-
+  metrics %>%
+  filter(`Accounting Standard` == 'GASB')
+
+metric_parameters <-
+  tribble(~Metric,
+          'UG First-time First Year Enrollment',
+          'Retention',
+          'State Appropriations',
+          'Market Price') %>%
+  mutate(formula = str_c('`', Metric, '` ~ Index'),
+         model = map2(formula, list(df), get_coefs)) %>%
+  unnest(cols = model) %>%
+  bind_rows(metric_parameters)
+
+    # metrics %>%
+    # group_by(Unitid) %>%
+    # nest() %>%
+    # mutate(enr = map2('`UG First-time First Year Enrollment` ~ Index', data, run_model),
+    #        Metric = 'UG First-time First Year Enrollment',
+    #        td = map(enr, tidy),
+    #        coef = map(td, coef_helper)) %>%
+    # select(Unitid, Metric, coef) %>%
+    # unnest(cols = coef) %>%
+    # rename(Intercept = `(Intercept)`,
+    #        Slope = Index)
+metric_parameters
 ```
 
 # Plots
