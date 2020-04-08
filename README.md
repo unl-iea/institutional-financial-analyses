@@ -11,6 +11,14 @@ Zemsky, R., Shaman, S., Campbell Baldridge, S. (2020). _The College Stress Test:
 * R 3.6.3
 * RStudio Version 1.2.5033
 
+## Dependencies
+
+* lubridate
+* broom
+* tidyr
+* dplyr
+* ggplot2
+
 ## Versioning
 
 1.0
