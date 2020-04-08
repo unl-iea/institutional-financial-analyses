@@ -216,7 +216,14 @@ system.time({
     years %>%
     mutate(data = map(`Fiscal Year`, load_retention)) %>%
     unnest(cols = data) %>%
-    mutate(retention = as.numeric(ret_pcf) / 100) %>%
+    mutate(retention = as.numeric(ret_pcf) / 100)
+  
+  retention <-
+    retention %>%
+    group_by(unitid) %>%
+    summarize(xretention = mean(retention, na.rm = TRUE)) %>%
+    inner_join(retention, by = 'unitid') %>%
+    mutate(retention = ifelse(is.na(retention), xretention, retention)) %>%
     select(unitid,
            `Fiscal Year`,
            retention)
@@ -292,6 +299,16 @@ finance
 
 Most public institutions use GASB accounting standards.  Needed values were pulled and deflated using the GDP deflator.
 
+  retention <-
+    retention %>%
+    group_by(unitid) %>%
+    summarize(xretention = mean(retention, na.rm = TRUE)) %>%
+    inner_join(retention, by = 'unitid') %>%
+    mutate(retention = ifelse(is.na(retention), xretention, retention)) %>%
+    select(unitid,
+           `Fiscal Year`,
+           retention)
+
 ```{r}
 system.time({
   finance <- 
@@ -313,6 +330,28 @@ system.time({
            `Hospital Expenses`,
            `Endowment EOY`) %>%
     bind_rows(finance)
+  
+  finance <-
+    finance %>%
+    group_by(unitid) %>%
+    summarize(xappr = mean(`State Appropriations`, na.rm = TRUE),
+              xtexp = mean(`Total Expenses`, na.rm = TRUE),
+              xhexp = mean(`Hospital Expenses`, na.rm = TRUE),
+              xedow = mean(`Endowment EOY`, na.rm = TRUE)) %>%
+    inner_join(finance, by = 'unitid') %>%
+    mutate(`Total Expenses` = ifelse(is.na(`Total Expenses`), xtexp, `Total Expenses`),
+           `Hospital Expenses` = ifelse(is.na(`Hospital Expenses`), xhexp, `Hospital Expenses`), 
+           `Endowment EOY` = ifelse(is.na(`Endowment EOY`), xedow, `Endowment EOY`),
+           `State Appropriations` = ifelse(is.na(`State Appropriations`), xappr, `State Appropriations`)) %>%
+    select(unitid,
+           Index,
+           `Fiscal Year`,
+           GDP,
+           `Accounting Standard`,
+           `State Appropriations`,
+           `Total Expenses`,
+           `Hospital Expenses`,
+           `Endowment EOY`)
 })
 ```
 
@@ -396,63 +435,53 @@ system.time({
 The authors create a linear function for each institution and use this to project three years past the most recent year.
 
 ```{r}
-coef_helper <- function(td) as_tibble(t(deframe(td)))
+system.time({
+  coef_helper <- function(td) as_tibble(t(deframe(td)))
 
-get_coefs <-
-  function(fml, df) {
-    df %>%
-      group_by(Unitid) %>%
-      nest() %>%
-      mutate(fit = map2(fml, data, run_model),
-             td = map(fit, tidy),
-             coef = map(td, coef_helper)) %>%
-      select(Unitid, coef) %>%
-      unnest(cols = coef) %>%
-      rename(Intercept = `(Intercept)`,
-             Slope = Index)
-  }
+  get_coefs <-
+    function(fml, df) {
+      df %>%
+        group_by(Unitid) %>%
+        nest() %>%
+        mutate(fit = map2(fml, data, run_model),
+               td = map(fit, tidy),
+               coef = map(td, coef_helper)) %>%
+        select(Unitid, coef) %>%
+        unnest(cols = coef) %>%
+        rename(Intercept = `(Intercept)`,
+               Slope = Index)
+    }
+  
+  df <-
+    metrics %>%
+    select(Unitid,
+           `Fiscal Year`,
+           Index,
+           `UG First-time First Year Enrollment`,
+           Retention,
+           `State Appropriations`,
+           `Endowment/Expenses`,
+           `Market Price`) %>%
+    drop_na()
+  
+  metric_parameters <-
+    tribble(~Metric,
+            'UG First-time First Year Enrollment',
+            'Retention',
+            'Endowment/Expenses',
+            'State Appropriations',
+            'Market Price') %>%
+    mutate(formula = str_c('`', Metric, '` ~ Index'),
+           model = map2(formula, list(df), get_coefs)) %>%
+    unnest(cols = model) %>%
+    mutate(projection = 11 * Slope + Intercept)
+})
+```
 
-df <-
-  metrics %>%
-  filter(`Accounting Standard` == 'FASB')
-
-metric_parameters <-
-  tribble(~Metric,
-          'UG First-time First Year Enrollment',
-          # 'Retention',
-          # 'Endowment/Expenses',
-          'Market Price') %>%
-  mutate(formula = str_c('`', Metric, '` ~ Index'),
-         model = map2(formula, list(df), get_coefs)) %>%
-  unnest(cols = model)
-
-# df <-
-#   metrics %>%
-#   filter(`Accounting Standard` == 'GASB')
-# 
-# metric_parameters <-
-#   tribble(~Metric,
-#           'UG First-time First Year Enrollment',
-#           'Retention',
-#           'State Appropriations',
-#           'Market Price') %>%
-#   mutate(formula = str_c('`', Metric, '` ~ Index'),
-#          model = map2(formula, list(df), get_coefs)) %>%
-#   unnest(cols = model) %>%
-#   bind_rows(metric_parameters)
-
-    # metrics %>%
-    # group_by(Unitid) %>%
-    # nest() %>%
-    # mutate(enr = map2('`UG First-time First Year Enrollment` ~ Index', data, run_model),
-    #        Metric = 'UG First-time First Year Enrollment',
-    #        td = map(enr, tidy),
-    #        coef = map(td, coef_helper)) %>%
-    # select(Unitid, Metric, coef) %>%
-    # unnest(cols = coef) %>%
-    # rename(Intercept = `(Intercept)`,
-    #        Slope = Index)
-metric_parameters
+```{r}
+metric_parameters %>%
+  select(Unitid, Metric, projection) %>%
+  pivot_wider(names_from = Metric, values_from = projection)
 ```
 
 ## Compute Stress Scores
@@ -568,68 +597,6 @@ system.time({
   
   rm(stress_summary)
 })
-```
-
-## Estimate Institutional Extrapolation Models
-
-```{r}
-coef_helper <- function(td) as_tibble(t(deframe(td)))
-
-get_coefs <-
-  function(fml, df) {
-    df %>%
-      group_by(Unitid) %>%
-      nest() %>%
-      mutate(fit = map2(fml, data, run_model),
-             td = map(fit, tidy),
-             coef = map(td, coef_helper)) %>%
-      select(Unitid, coef) %>%
-      unnest(cols = coef) %>%
-      rename(Intercept = `(Intercept)`,
-             Slope = Index)
-  }
-
-df <-
-  metrics %>%
-  filter(`Accounting Standard` == 'FASB')
-
-metric_parameters <-
-  tribble(~Metric,
-          'UG First-time First Year Enrollment',
-          'Retention',
-          'Endowment/Expenses',
-          'Market Price') %>%
-  mutate(formula = str_c('`', Metric, '` ~ Index'),
-         model = map2(formula, list(df), get_coefs)) %>%
-  unnest(cols = model)
-
-df <-
-  metrics %>%
-  filter(`Accounting Standard` == 'GASB')
-
-metric_parameters <-
-  tribble(~Metric,
-          'UG First-time First Year Enrollment',
-          'Retention',
-          'State Appropriations',
-          'Market Price') %>%
-  mutate(formula = str_c('`', Metric, '` ~ Index'),
-         model = map2(formula, list(df), get_coefs)) %>%
-  unnest(cols = model) %>%
-  bind_rows(metric_parameters)
-
-    # metrics %>%
-    # group_by(Unitid) %>%
-    # nest() %>%
-    # mutate(enr = map2('`UG First-time First Year Enrollment` ~ Index', data, run_model),
-    #        Metric = 'UG First-time First Year Enrollment',
-    #        td = map(enr, tidy),
-    #        coef = map(td, coef_helper)) %>%
-    # select(Unitid, Metric, coef) %>%
-    # unnest(cols = coef) %>%
-    # rename(Intercept = `(Intercept)`,
-    #        Slope = Index)
-metric_parameters
 ```
 
 ## Output Stress Scores File
