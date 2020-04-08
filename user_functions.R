@@ -265,7 +265,8 @@ load_fasb <- function(year)
   
   net_load_zip(url, name) %>%
     rename_all(tolower) %>%
-    select(unitid, 
+    select(unitid,
+           `State Appropriations` = f2d03,
            `Total Expenses` = f2e131, 
            `Hospital Expenses` = f2e091, 
            `Endowment EOY` = f2h02)
@@ -287,6 +288,9 @@ load_gasb <- function(year)
   net_load_zip(url, name) %>%
     rename_all(tolower) %>%
     select(unitid,
-           `State Appropriations` = f1b11)
+           `State Appropriations` = f1b11,
+           `Total Expenses` = f1c191, 
+           `Hospital Expenses` = f1c121, 
+           `Endowment EOY` = f1h02)
 }
 
