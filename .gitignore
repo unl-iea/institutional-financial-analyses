@@ -43,3 +43,5 @@ vignettes/*.pdf
 ipeds_metrics.csv
 reduced_fields.csv
 .DS_Store
+metrics.csv
+stress.csv
