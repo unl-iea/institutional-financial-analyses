@@ -271,17 +271,21 @@ system.time({
            data = map(`Fiscal Year`, load_fasb)) %>%
     unnest(cols = data) %>%
     mutate(`Total Expenses` = as.double(`Total Expenses`) / GDP,
-           `Hospital Expenses` = as.double(`Hospital Expenses`) / GDP, 
-           `Endowment EOY` = as.double(`Endowment EOY`) / GDP) %>%
+           `Hospital Expenses` = as.double(`Hospital Expenses`) / GDP,
+           `Endowment EOY` = as.double(`Endowment EOY`) / GDP,
+           `State Appropriations` = as.double(`State Appropriations`) / GDP) %>%
     select(unitid,
            Index,
            `Fiscal Year`,
            GDP,
            `Accounting Standard`,
+           `State Appropriations`,
            `Total Expenses`,
            `Hospital Expenses`,
            `Endowment EOY`)
 })
+
+finance
 ```
 
 ### Finance (F1A: GASB)
@@ -295,13 +299,19 @@ system.time({
     mutate(`Accounting Standard` = 'GASB',
            data = map(`Fiscal Year`, load_gasb)) %>%
     unnest(cols = data) %>%
-    mutate(`State Appropriations` = as.double(`State Appropriations`) / GDP) %>%
+    mutate(`Total Expenses` = as.double(`Total Expenses`) / GDP,
+           `Hospital Expenses` = as.double(`Hospital Expenses`) / GDP, 
+           `Endowment EOY` = as.double(`Endowment EOY`) / GDP,
+           `State Appropriations` = as.double(`State Appropriations`) / GDP) %>%
     select(unitid,
            Index,
            `Fiscal Year`,
            GDP,
            `Accounting Standard`,
-           `State Appropriations`) %>%
+           `State Appropriations`,
+           `Total Expenses`,
+           `Hospital Expenses`,
+           `Endowment EOY`) %>%
     bind_rows(finance)
 })
 ```
@@ -316,57 +326,69 @@ Because EF-C is optional in odd-numbered years, there were a considerable number
 * _Market Price_ = In State Tuition times Proportion of In State Enrollment plus Out of State Tution time Proportion of Out of State Enrollment Less Institutional Grant Aid
 
 ```{r}
-avg_is <-
-  state_enrollment %>%
-  group_by(unitid) %>%
-  summarize(xfirst_years = mean(first_years, na.rm = TRUE),
-            xin_state = mean(`In State Enrollment`, na.rm = TRUE),
-            xout_state = mean(`Out of State Enrollment`, na.rm = TRUE))
+system.time({
+  avg_is <-
+    state_enrollment %>%
+    group_by(unitid) %>%
+    summarize(xfirst_years = mean(first_years, na.rm = TRUE),
+              xin_state = mean(`In State Enrollment`, na.rm = TRUE),
+              xout_state = mean(`Out of State Enrollment`, na.rm = TRUE))
+  
+  rollups <-
+    total_enrollment %>%
+    inner_join(charges, by = c('unitid', 'Fiscal Year')) %>%
+    inner_join(aid, by = c('unitid', 'Fiscal Year')) %>%
+    inner_join(retention, by = c('unitid', 'Fiscal Year')) %>%
+    left_join(state_enrollment, by = c('unitid', 'Fiscal Year')) %>%
+    inner_join(avg_is, by = 'unitid') %>%
+    mutate(first_years = ifelse(is.na(first_years), xfirst_years, first_years),
+           `In State Enrollment` = ifelse(is.na(`In State Enrollment`), xin_state, `In State Enrollment`),
+           `Out of State Enrollment` = ifelse(is.na(`Out of State Enrollment`), xout_state, `Out of State Enrollment`)) %>%
+    inner_join(flags, ., by = c('unitid', 'Fiscal Year')) %>%
+    group_by(parent_id, `Fiscal Year`) %>%
+    summarize(`UG First-time First Year Enrollment` = sum(`UG First-time First Year Enrollment`, na.rm = TRUE),
+              `In State Enrollment` = sum(`In State Enrollment`, na.rm = TRUE) / sum(first_years, na.rm = TRUE),
+              `Out of State Enrollment` = sum(`Out of State Enrollment`, na.rm = TRUE) / sum(first_years, na.rm = TRUE),
+              Retention = mean(retention, na.rm = TRUE),
+              `Inst Grant Aid` = sum(`Inst Grant Aid`, na.rm = TRUE),
+              `In State Tuition` = mean(`In State Tuition`, na.rm = TRUE),
+              `Out of State Tuition` = mean(`Out of State Tuition`, na.rm = TRUE)) %>%
+    ungroup() %>%
+    rename(unitid = parent_id)
+  
+  metrics <-
+    institutions %>%
+    inner_join(finance, by = c('unitid')) %>%
+    inner_join(rollups, by = c('unitid', 'Fiscal Year')) %>%
+    add_count(unitid) %>%
+    filter(n == 8) %>%
+    mutate(`Endowment/Expenses` = `Endowment EOY` / (`Total Expenses` - `Hospital Expenses`),
+           `Average Grant Aid` = `Inst Grant Aid` / `UG First-time First Year Enrollment`,
+           `Market Price` = (`In State Tuition` * `In State Enrollment` + `Out of State Tuition` * `Out of State Enrollment`) - `Average Grant Aid`) %>%
+    rename(Unitid = unitid)
+  
+  rm(institutions,
+     finance,
+     charges,
+     aid,
+     total_enrollment,
+     state_enrollment,
+     flags,
+     retention,
+     avg_is,
+     rollups,
+     years)
+})
+```
 
-rollups <-
-  total_enrollment %>%
-  inner_join(charges, by = c('unitid', 'Fiscal Year')) %>%
-  inner_join(aid, by = c('unitid', 'Fiscal Year')) %>%
-  inner_join(retention, by = c('unitid', 'Fiscal Year')) %>%
-  left_join(state_enrollment, by = c('unitid', 'Fiscal Year')) %>%
-  inner_join(avg_is, by = 'unitid') %>%
-  mutate(first_years = ifelse(is.na(first_years), xfirst_years, first_years),
-         `In State Enrollment` = ifelse(is.na(`In State Enrollment`), xin_state, `In State Enrollment`),
-         `Out of State Enrollment` = ifelse(is.na(`Out of State Enrollment`), xout_state, `Out of State Enrollment`)) %>%
-  inner_join(flags, ., by = c('unitid', 'Fiscal Year')) %>%
-  group_by(parent_id, `Fiscal Year`) %>%
-  summarize(`UG First-time First Year Enrollment` = sum(`UG First-time First Year Enrollment`, na.rm = TRUE),
-            `In State Enrollment` = sum(`In State Enrollment`, na.rm = TRUE) / sum(first_years, na.rm = TRUE),
-            `Out of State Enrollment` = sum(`Out of State Enrollment`, na.rm = TRUE) / sum(first_years, na.rm = TRUE),
-            Retention = mean(retention, na.rm = TRUE),
-            `Inst Grant Aid` = sum(`Inst Grant Aid`, na.rm = TRUE),
-            `In State Tuition` = mean(`In State Tuition`, na.rm = TRUE),
-            `Out of State Tuition` = mean(`Out of State Tuition`, na.rm = TRUE)) %>%
-  ungroup() %>%
-  rename(unitid = parent_id)
+## Output Metrics File
 
-metrics <-
-  institutions %>%
-  inner_join(finance, by = c('unitid')) %>%
-  inner_join(rollups, by = c('unitid', 'Fiscal Year')) %>%
-  add_count(unitid) %>%
-  filter(n == 8) %>%
-  mutate(`Endowment/Expenses` = `Endowment EOY` / (`Total Expenses` - `Hospital Expenses`),
-         `Average Grant Aid` = `Inst Grant Aid` / `UG First-time First Year Enrollment`,
-         `Market Price` = (`In State Tuition` * `In State Enrollment` + `Out of State Tuition` * `Out of State Enrollment`) - `Average Grant Aid`) %>%
-  rename(Unitid = unitid)
-
-rm(institutions,
-   finance,
-   charges,
-   aid,
-   total_enrollment,
-   state_enrollment,
-   flags,
-   retention,
-   avg_is,
-   rollups,
-   years)
+```{r}
+system.time({
+  metrics %>%
+    write_csv('data/metrics.csv',
+              na = '')
+})
 ```
 
 ## Estimate Institutional Extrapolation Models
@@ -390,34 +412,34 @@ get_coefs <-
              Slope = Index)
   }
 
+df <-
+  metrics %>%
+  filter(`Accounting Standard` == 'FASB')
+
+metric_parameters <-
+  tribble(~Metric,
+          'UG First-time First Year Enrollment',
+          # 'Retention',
+          # 'Endowment/Expenses',
+          'Market Price') %>%
+  mutate(formula = str_c('`', Metric, '` ~ Index'),
+         model = map2(formula, list(df), get_coefs)) %>%
+  unnest(cols = model)
+
 # df <-
 #   metrics %>%
-#   filter(`Accounting Standard` == 'FASB')
+#   filter(`Accounting Standard` == 'GASB')
 # 
 # metric_parameters <-
 #   tribble(~Metric,
 #           'UG First-time First Year Enrollment',
 #           'Retention',
-#           'Endowment/Expenses',
+#           'State Appropriations',
 #           'Market Price') %>%
 #   mutate(formula = str_c('`', Metric, '` ~ Index'),
 #          model = map2(formula, list(df), get_coefs)) %>%
-#   unnest(cols = model)
-
-df <-
-  metrics %>%
-  filter(`Accounting Standard` == 'GASB')
-
-metric_parameters <-
-  tribble(~Metric,
-          'UG First-time First Year Enrollment',
-          'Retention',
-          'State Appropriations',
-          'Market Price') %>%
-  mutate(formula = str_c('`', Metric, '` ~ Index'),
-         model = map2(formula, list(df), get_coefs)) %>%
-  unnest(cols = model) %>%
-  bind_rows(metric_parameters)
+#   unnest(cols = model) %>%
+#   bind_rows(metric_parameters)
 
     # metrics %>%
     # group_by(Unitid) %>%
@@ -459,8 +481,7 @@ These were compared to benchmarks established by the authors to set statuses of 
 system.time({
   stress_scores <-
     metrics %>%
-    filter(Control == 'Public',
-           `Accounting Standard` == 'GASB') %>%
+    filter(Control == 'Public') %>%
     group_by(Unitid) %>%
     mutate(`Market Price Change` = (`Market Price` - lag(`Market Price`, 7)) / lag(`Market Price`, 7),
            `Market Price Alert` = ifelse(`Market Price Change` <= 0.0, 1, 0),
@@ -478,28 +499,7 @@ system.time({
   
   stress_scores <-
     metrics %>%
-    filter(Control == 'Public',
-           `Accounting Standard` == 'FASB') %>%
-    group_by(Unitid) %>%
-    mutate(`Market Price Change` = (`Market Price` - lag(`Market Price`, 7)) / lag(`Market Price`, 7),
-           `Market Price Alert` = ifelse(`Market Price Change` <= -0.0, 1, 0),
-           `Market Price Warning` = ifelse(`Market Price Change` <= -0.083, 1, 0),
-           `Endowment/Expenses Change` = (`Endowment/Expenses` - lag(`Endowment/Expenses`, 7)) / lag(`Endowment/Expenses`, 7),
-           `Endowment/Expenses Alert` = ifelse(`Endowment/Expenses Change` <= 0.0, 1, 0),
-           `Endowment/Expenses Warning` = ifelse(`Endowment/Expenses Change` <= -0.103, 1, 0),
-           `Retention Change` = (Retention - lag(Retention, 7)) / lag(Retention, 7),
-           `Retention Alert` = ifelse(`Retention Change` <= 0.68, 1, 0),
-           `Retention Warning` = ifelse(`Retention Change` <= 0.62, 1, 0),
-           `Enrollment Change` = (`UG First-time First Year Enrollment` - lag(`UG First-time First Year Enrollment`, 7)) / lag(`UG First-time First Year Enrollment`, 7),
-           `Enrollment Alert` = ifelse(`Enrollment Change` <= -0.154, 1, 0),
-           `Enrollment Warning` = ifelse(`Enrollment Change` <= -0.256, 1, 0)) %>%
-    ungroup() %>%
-    bind_rows(stress_scores)
-  
-  stress_scores <-
-    metrics %>%
-    filter(Control == 'Private',
-           `Accounting Standard` == 'FASB') %>%
+    filter(Control == 'Private') %>%
     group_by(Unitid) %>%
     mutate(`Market Price Change` = (`Market Price` - lag(`Market Price`, 7)) / lag(`Market Price`, 7),
            `Market Price Alert` = ifelse(`Market Price Change` <= -0.104, 1, 0),
@@ -632,6 +632,16 @@ metric_parameters <-
 metric_parameters
 ```
 
+## Output Stress Scores File
+
+```{r}
+system.time({
+  stress_scores %>%
+    write_csv('data/stress.csv',
+              na = '')
+})
+```
+
 # Plots
 
 ## Endowment/Expenses vs Market Price
@@ -648,28 +658,6 @@ metrics %>%
 metrics %>%
   ggplot(aes(x = `State Appropriations`, y = `Market Price`)) +
     geom_hex(bins = 40)
-```
-
-# Ouput Files
-
-## Metrics File
-
-```{r}
-system.time({
-  metrics %>%
-    write_csv('data/metrics.csv',
-              na = '')
-})
-```
-
-## Stress Scores File
-
-```{r}
-system.time({
-  stress_scores %>%
-    write_csv('data/stress.csv',
-              na = '')
-})
 ```
 
 # References
