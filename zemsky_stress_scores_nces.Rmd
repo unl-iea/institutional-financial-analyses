@@ -418,8 +418,8 @@ system.time({
            `Accounting Standard` == 'FASB') %>%
     group_by(Unitid) %>%
     mutate(`Market Price Change` = (`Market Price` - lag(`Market Price`, 7)) / lag(`Market Price`, 7),
-           `Market Price Alert` = ifelse(`Market Price Change` <= -0.104, 1, 0),
-           `Market Price Warning` = ifelse(`Market Price Change` <= -0.175, 1, 0),
+           `Market Price Alert` = ifelse(`Market Price Change` <= -0.0, 1, 0),
+           `Market Price Warning` = ifelse(`Market Price Change` <= -0.083, 1, 0),
            `Endowment/Expenses Change` = (`Endowment/Expenses` - lag(`Endowment/Expenses`, 7)) / lag(`Endowment/Expenses`, 7),
            `Endowment/Expenses Alert` = ifelse(`Endowment/Expenses Change` <= 0.0, 1, 0),
            `Endowment/Expenses Warning` = ifelse(`Endowment/Expenses Change` <= -0.103, 1, 0),
@@ -444,11 +444,11 @@ system.time({
            `Endowment/Expenses Alert` = ifelse(`Endowment/Expenses Change` <= 0.0, 1, 0),
            `Endowment/Expenses Warning` = ifelse(`Endowment/Expenses Change` <= -0.103, 1, 0),
            `Retention Change` = (Retention - lag(Retention, 7)) / lag(Retention, 7),
-           `Retention Alert` = ifelse(`Retention Change` <= 0.0, 1, 0),
-           `Retention Warning` = ifelse(`Retention Change` <= -0.083, 1, 0),
+           `Retention Alert` = ifelse(`Retention Change` <= 0.656, 1, 0),
+           `Retention Warning` = ifelse(`Retention Change` <= 0.564, 1, 0),
            `Enrollment Change` = (`UG First-time First Year Enrollment` - lag(`UG First-time First Year Enrollment`, 7)) / lag(`UG First-time First Year Enrollment`, 7),
-           `Enrollment Alert` = ifelse(`Enrollment Change` <= 0.0, 1, 0),
-           `Enrollment Warning` = ifelse(`Enrollment Change` <= -0.083, 1, 0)) %>%
+           `Enrollment Alert` = ifelse(`Enrollment Change` <= 0.174, 1, 0),
+           `Enrollment Warning` = ifelse(`Enrollment Change` <= 0.308, 1, 0)) %>%
     ungroup() %>%
     bind_rows(stress_scores) %>%
     filter(`Fiscal Year` == params$year) %>%
