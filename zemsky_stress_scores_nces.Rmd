@@ -369,6 +369,70 @@ rm(institutions,
    years)
 ```
 
+## Estimate Institutional Extrapolation Models
+
+The authors create a linear function for each institution and use this to project three years past the most recent year.
+
+```{r}
+coef_helper <- function(td) as_tibble(t(deframe(td)))
+
+get_coefs <-
+  function(fml, df) {
+    df %>%
+      group_by(Unitid) %>%
+      nest() %>%
+      mutate(fit = map2(fml, data, run_model),
+             td = map(fit, tidy),
+             coef = map(td, coef_helper)) %>%
+      select(Unitid, coef) %>%
+      unnest(cols = coef) %>%
+      rename(Intercept = `(Intercept)`,
+             Slope = Index)
+  }
+
+# df <-
+#   metrics %>%
+#   filter(`Accounting Standard` == 'FASB')
+# 
+# metric_parameters <-
+#   tribble(~Metric,
+#           'UG First-time First Year Enrollment',
+#           'Retention',
+#           'Endowment/Expenses',
+#           'Market Price') %>%
+#   mutate(formula = str_c('`', Metric, '` ~ Index'),
+#          model = map2(formula, list(df), get_coefs)) %>%
+#   unnest(cols = model)
+
+df <-
+  metrics %>%
+  filter(`Accounting Standard` == 'GASB')
+
+metric_parameters <-
+  tribble(~Metric,
+          'UG First-time First Year Enrollment',
+          'Retention',
+          'State Appropriations',
+          'Market Price') %>%
+  mutate(formula = str_c('`', Metric, '` ~ Index'),
+         model = map2(formula, list(df), get_coefs)) %>%
+  unnest(cols = model) %>%
+  bind_rows(metric_parameters)
+
+    # metrics %>%
+    # group_by(Unitid) %>%
+    # nest() %>%
+    # mutate(enr = map2('`UG First-time First Year Enrollment` ~ Index', data, run_model),
+    #        Metric = 'UG First-time First Year Enrollment',
+    #        td = map(enr, tidy),
+    #        coef = map(td, coef_helper)) %>%
+    # select(Unitid, Metric, coef) %>%
+    # unnest(cols = coef) %>%
+    # rename(Intercept = `(Intercept)`,
+    #        Slope = Index)
+metric_parameters
+```
+
 ## Compute Stress Scores
 
 Change rates from the base year to the most recent year were calculated for four metrics for each institution type.
