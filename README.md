@@ -2,7 +2,7 @@
 
 Model the financial health of postsecondary institutions using IPEDS and other federal data.
 
-Stress Scores estimated based on methods outline in Appendix A from:
+Stress Scores estimated based on methods recommended in Appendix A from:
 
 Zemsky, R., Shaman, S., Campbell Baldridge, S. (2020). _The College Stress Test: Tracking Institutional Futures across a Crowded Market_. Johns Hopkins University Press.  Baltimore, Maryland.
 
