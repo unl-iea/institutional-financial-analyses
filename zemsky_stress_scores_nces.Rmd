@@ -3,11 +3,13 @@ title: "IPEDS Financial Metrics"
 subtitle: "NCES Data Files"
 author: "Jason P. Casey"
 date: 2020-04-05
-output: html_notebook
+output: 
+  html_notebook:
+    code_folding: show
 params:
   year:
     label: "Last year of series"
-    value: 2016
+    value: 2018
   unitid:
     label: "Reference Institution"
     value: "181464"
