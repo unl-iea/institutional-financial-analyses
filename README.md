@@ -1,6 +1,6 @@
 # institutional-financial-analyses
 
-Model the financial fragility of postsecondary institutions using IPEDS and other federal data.
+Model the financial health of postsecondary institutions using IPEDS and other federal data.
 
 ## Built With
 
