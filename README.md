@@ -20,6 +20,7 @@ Zemsky, R., Shaman, S., Campbell Baldridge, S. (2020). _The College Stress Test:
 * lubridate 1.7.8
 * purrr   0.3.3
 * readr   1.3.1
+* RSQLite 2.2.0
 * stringr 1.4.0
 * tibble  3.0.0
 * tidyr 1.0.2
