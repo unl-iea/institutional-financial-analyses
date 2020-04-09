@@ -508,6 +508,12 @@ Change rates from the base year to the most recent year were calculated for four
 
 These were compared to benchmarks established by the authors to set statuses of _Alert_ and _Warning_ (consistent with National Weather Service terminology) for each of the four core metrics.  These Alert and Warning Scores were summed to produce the final _Stress Score_.
 
+_Notes_
+* The assumption that increases in _Retention_ of 56% - 68% are possible is implausible.  This was either due to a misprint, or a basic misuse of the statistic.  Highly selective institutions with return rates in the 90% range are getting Alerts and Warnings on this statistic because their increases fall below 65.6% and 56.4%, respectively.  A more commonsense approach might be to alert those with declining retention rates, and warn those with declines of larger than some criterion such as, say, 5% or 10%.
+* It is unclear whether the relationship between _Undergraduate First-time First-year Enrollment_ and _Market Price_ is fully accounted for in the authors' model.  Does a decrease in realized tuition reflect poor financial health if enrollments are increasing?  Similarly, increased tuition my not reflect strenth if enrollments are falling.
+* Many institutions that have publicly acknowledged financial struggles do not seem to have correspondingly high stress scores.
+* Missing values are hard to account for in the calculation of metrics and stress scores.  Non-random patterns of missing data might undermine this model for measuring risk.
+
 ```{r}
 system.time({
   criteria <-
@@ -553,7 +559,7 @@ system.time({
                  values_to = 'Value') %>%
     arrange(Unitid, Control, Metric, Index) %>%
     group_by(Unitid, Control, Metric) %>%
-    mutate(Change = ifelse(Index == 8, Value - lag(Value, 7), Value - lag(Value, 8))) %>%
+    mutate(Change = ifelse(Index == 8, (Value - lag(Value, 7)) / lag(Value, 7), (Value - lag(Value, 8)) / lag(Value, 8))) %>%
     ungroup() %>%
     drop_na()
   
@@ -582,6 +588,7 @@ system.time({
     mutate(Type = recode(Index,
                          `8` = 'Actual',
                          `11` = 'Projected')) %>%
+    select(-Index) %>%
     pivot_wider(names_from = c(Metric, Type),
                 values_from = c(Change, Alert, Warning)) %>%
     inner_join(institution_header, ., by = c('Unitid', 'Control'))
@@ -596,6 +603,11 @@ system.time({
     write_csv('data/stress.csv',
               na = '')
 })
+```
+
+```{r}
+stress_scores %>%
+  filter(Unitid == 181464)
 ```
 
 # Plots
