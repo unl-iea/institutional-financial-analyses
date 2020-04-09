@@ -605,11 +605,6 @@ system.time({
 })
 ```
 
-```{r}
-stress_scores %>%
-  filter(Unitid == 181464)
-```
-
 # Plots
 
 ## Endowment/Expenses vs Market Price
