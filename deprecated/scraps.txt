@@ -1,0 +1,15 @@
+  if ('eftotlt' %in% colnames(df))
+  {
+    df <-
+      df %>%
+      mutate(`UG First-time First Year Enrollment` = as.numeric(eftotlt))
+  }
+  else
+  {
+    df <-
+      df %>%
+      mutate(`UG First-time First Year Enrollment` = as.numeric(efrace15) + as.numeric(efrace16))
+  }
+  
+  df %>%
+    select(unitid, `UG First-time First Year Enrollment`)
