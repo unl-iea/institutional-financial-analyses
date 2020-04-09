@@ -170,6 +170,10 @@ system.time({
     years %>%
     mutate(data = map(`Fiscal Year`, load_submissions)) %>%
     unnest(cols = data) %>%
+    filter(cohrtstu == '1') %>%
+    mutate(parent_id = ifelse(prch_f %in% c('1', '2', '3'), idx_f, unitid)) %>%
+    select(unitid,
+           parent_id) %>%
     select(unitid, `Fiscal Year`, parent_id)
 })
 ```
