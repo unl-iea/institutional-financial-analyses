@@ -517,7 +517,6 @@ system.time({
            `Endowment/Expenses`,
            `Market Price`) %>%
     bind_rows(projections) %>%
-    # filter(add_count(Unitid, Control, Metric) == 9) %>%
     pivot_longer(cols = 4:8,
                  names_to = 'Metric',
                  values_to = 'Value') %>%
