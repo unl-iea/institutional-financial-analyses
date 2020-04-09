@@ -21,16 +21,11 @@ source(file="user_functions.R")
 # set constants
 recent_year <- 2018
 
-# get the gdp data from the Federal Reserve Bank of St. Louis
-system.time({
-  gdp <-
-    read_csv('https://fred.stlouisfed.org/graph/fredgraph.csv?id=GDPDEF',
-             col_types = cols(.default = col_character())) %>%
-    rename_all(tolower) %>%
-    mutate(date = as_date(date),
-           fiscal_year = ifelse(month(date) > 6, year(date) + 1, year(date)),
-           gdp = as.double(gdpdef) / 100)
-})
+
+
+# create a file database (db) to store IPEDS data
+db <- dbConnect(RSQLite::SQLite(), "db.sqlite")
+
 
 
 # base tibble used for all data pulls
@@ -42,6 +37,28 @@ system.time({
            fiscal_year = str_c(collection_year - 1, collection_year, sep='-'),
            fiscal_year_short = collapse_year(collection_year),
            academic_year = str_c(collection_year, collection_year + 1, sep='-'))
+  
+  # write table to db
+  dbWriteTable(db, "ipeds_years", ipeds_years, overwrite=TRUE)
+})
+
+
+
+# get the gdp data from the Federal Reserve Bank of St. Louis
+system.time({
+  gdp <-
+    read_csv('https://fred.stlouisfed.org/graph/fredgraph.csv?id=GDPDEF',
+             col_types = cols(.default = col_character())) %>%
+    rename_all(tolower) %>%
+    mutate(date = as_date(date),
+           fiscal_year = ifelse(month(date) > 6, year(date) + 1, year(date)),
+           gdp = as.double(gdpdef) / 100)
+
+  # write table to db
+  dbWriteTable(db, "gdp", gdp, overwrite=TRUE)
+  
+  # housekeeping
+  rm(gdp)
 })
 
 
@@ -140,6 +157,12 @@ system.time({
               rev_f,
               rev_sfa,
               rev_gr))
+  
+  # write table to db
+  dbWriteTable(db, "directory", directory, overwrite=TRUE)
+  
+  # housekeeping
+  rm(directory)
 })
   
 
@@ -150,6 +173,12 @@ system.time({
     mutate(data = map(collection_year, load_ic)) %>%
     select(collection_year, data) %>%
     unnest(cols = data)
+  
+  # write table to db
+  dbWriteTable(db, "characteristics", characteristics, overwrite=TRUE)
+  
+  # housekeeping
+  rm(characteristics)
 })
  
 
@@ -160,23 +189,38 @@ system.time({
     mutate(data = map(collection_year, load_submissions)) %>%
     select(collection_year, data) %>%
     unnest(cols = data)
+  
+  # write table to db
+  dbWriteTable(db, "submissions", submissions, overwrite=TRUE)
+  
+  # housekeeping
+  rm(submissions)
 })
 
 
-# create a file database (db) to store IPEDS data
-db <- dbConnect(RSQLite::SQLite(), "db.sqlite")
-
+# grab fall enrollment data
 system.time({
-  dbWriteTable(db, "ipeds_years", ipeds_years, overwrite=TRUE)
-  dbWriteTable(db, "gdp", gdp, overwrite=TRUE)
-  dbWriteTable(db, "directory", directory, overwrite=TRUE)
-  dbWriteTable(db, "characteristics", characteristics, overwrite=TRUE)
-  dbWriteTable(db, "submissions", submissions, overwrite=TRUE)
+  fall_enrollment <-
+    ipeds_years %>%
+    mutate(data = map(collection_year, load_fall_enrollment)) %>%
+    unnest(cols = data) %>%
+    pivot_longer(cols = efnralm:ef2morw,
+                 names_to = "variable", 
+                 values_to = "headcount") %>%
+    separate(variable, c("survey", "demographic_key"), sep = 2) %>%
+    select(-survey)
   
-  })
+  # write table to db
+  dbWriteTable(db, "fall_enrollment", fall_enrollment, overwrite=TRUE)
+  
+  # housekeeping
+  rm(fall_enrollment)
+})
+
+
 
 # housekeeping
-rm(ipeds_years, gdp, directory, characteristics)
+rm(ipeds_years)
 
 # load directory to check that values were properly written
 tbl(db, 'directory') %>%
