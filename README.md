@@ -13,11 +13,16 @@ Zemsky, R., Shaman, S., Campbell Baldridge, S. (2020). _The College Stress Test:
 
 ## Dependencies
 
-* lubridate
-* broom
-* tidyr
-* dplyr
-* ggplot2
+* broom 0.5.5
+* dplyr 0.8.5
+* forcats 0.5.0
+* ggplot2 3.3.0
+* lubridate 1.7.8
+* purrr   0.3.3
+* readr   1.3.1
+* stringr 1.4.0
+* tibble  3.0.0
+* tidyr 1.0.2
 
 ## Versioning
 

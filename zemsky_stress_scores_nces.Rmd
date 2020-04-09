@@ -65,6 +65,7 @@ library(knitr)
 library(lubridate)
 library(broom)
 library(tidyverse)
+
 # set default document options
 knitr::opts_chunk$set(fig.width = 8,
                       fig.asp = 0.618,
@@ -72,8 +73,10 @@ knitr::opts_chunk$set(fig.width = 8,
                       warning = FALSE,
                       message = FALSE,
                       collapse = TRUE)
+
 # set random seed
 set.seed(1965)
+
 # include user functions
 source(file="user_functions.R")
 ```
@@ -109,6 +112,7 @@ years <-
   tibble(`Fiscal Year` = seq(params$year - 7, params$year)) %>%
   mutate(Index = row_number()) %>%
   inner_join(gdp, by = c('Fiscal Year'))
+
 rm(gdp)
 ```
 
@@ -360,7 +364,7 @@ system.time({
 
 Because EF-C is optional in odd-numbered years, there were a considerable number of missing values.  An institution's mean values were imputed for each missing year of counts for this section of the survey.  All non-financial metrics were aggregated at the parent institution's unitid and data were merged with the institutional header and financial data.  The basic metrics were computed as recommended in the book:
 
-* Undergraduate First-time First-year Enrollment
+* _Undergraduate First-time First-year Enrollment_
 * _Retention_ = Retention Rate
 * _Endowment/Expenses_ = End-of-year Endowment / Total Expenses net of Hospital Expense
 * _Market Price_ = In State Tuition times Proportion of In State Enrollment plus Out of State Tution time Proportion of Out of State Enrollment Less Institutional Grant Aid
@@ -509,6 +513,7 @@ Change rates from the base year to the most recent year were calculated for four
 These were compared to benchmarks established by the authors to set statuses of _Alert_ and _Warning_ (consistent with National Weather Service terminology) for each of the four core metrics.  These Alert and Warning Scores were summed to produce the final _Stress Score_.
 
 _Notes_
+
 * The assumption that increases in _Retention_ of 56% - 68% are possible is implausible.  This was either due to a misprint, or a basic misuse of the statistic.  Highly selective institutions with return rates in the 90% range are getting Alerts and Warnings on this statistic because their increases fall below 65.6% and 56.4%, respectively.  A more commonsense approach might be to alert those with declining retention rates, and warn those with declines of larger than some criterion such as, say, 5% or 10%.
 * It is unclear whether the relationship between _Undergraduate First-time First-year Enrollment_ and _Market Price_ is fully accounted for in the authors' model.  Does a decrease in realized tuition reflect poor financial health if enrollments are increasing?  Similarly, increased tuition my not reflect strenth if enrollments are falling.
 * Many institutions that have publicly acknowledged financial struggles do not seem to have correspondingly high stress scores.
@@ -640,3 +645,14 @@ citation('tidyverse')
 ```
 
 Built with R version `r getRversion()`.
+
+Packages and versions:
+
+```{r}
+packageVersion('lubridate')
+packageVersion('broom')
+packageVersion('tidyr')
+packageVersion('dplyr')
+packageVersion('ggplot2')
+```
+
