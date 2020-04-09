@@ -25,7 +25,8 @@ net_load_zip <- function(file_url, file_name)
     read_csv(unz(temp, file_name),
              locale = locale(encoding = "latin1"),
              col_types = cols(.default = col_character())) %>%
-    rename_all(tolower)
+    rename_all(tolower) %>%
+    select(-starts_with('x'))
   
   unlink(temp)
   rm(temp)
@@ -52,24 +53,8 @@ load_ic <- function(year)
   url <- str_c('https://nces.ed.gov/ipeds/datacenter/data/IC', year - 1, '.zip')
   name <- str_c('ic', year - 1, '.csv')
   
-  df <-
-    net_load_zip(url, name) %>%
-    rename_all(tolower)
-  
-  if ('distnced' %in% colnames(df))
-  {
-    df <-
-      df %>%
-      mutate(distance_ed = ifelse(distnced == '1', 1, 0))
+  net_load_zip(url, name)
   }
-  else
-  {
-    df$distance_ed <- 0
-  }
-  
-  df %>%
-    select(unitid, distance_ed, ft_ug)
-}
 
 
 
@@ -77,60 +62,10 @@ load_ic <- function(year)
 load_hd <- function(year)
 {
   # access directory data via net
-  ic <- load_ic(year)
+  url <- str_c('https://nces.ed.gov/ipeds/datacenter/data/HD', year, '.zip')
+  name <- str_c('hd', year, '.csv')
   
-  url <- str_c('https://nces.ed.gov/ipeds/datacenter/data/HD', year - 1, '.zip')
-  name <- str_c('hd', year - 1, '.csv')
-  
-  df <-
-    net_load_zip(url, name) %>%
-    rename_all(tolower) %>%
-    filter(iclevel == '1') %>%
-    inner_join(ic, by = 'unitid') %>%
-    mutate(Control = recode(control,
-                            '1' = 'Public',
-                            '2' = 'Private',
-                            '3' = 'Proprietary',
-                            .default = 'Unknown'),
-           deathyr = as.integer(deathyr),
-           Closed = ifelse(deathyr < 0, 0, 1),
-           `Close Year` = ifelse(Closed == 1,
-                                 deathyr,
-                                 NA),
-           obereg = as.integer(obereg),
-           FIPS = as.integer(fips))
-  
-  if ('longitud' %in% colnames(df))
-  {
-    df <-
-      df %>%
-      mutate(Longitude = as.double(longitud),
-             Latitude = as.double(latitude))
-  }
-  else
-  {
-    df <-
-      df %>%
-      mutate(Longitude = NA,
-             Latitude = NA)
-  }
-  
-  df %>%
-    select(unitid,
-           distance_ed,
-           obereg,
-           opeflag,
-           ft_ug,
-           deggrant,
-           `Institution Name` = instnm,
-           City = city,
-           State = stabbr,
-           FIPS,
-           Control,
-           Closed,
-           `Close Year`,
-           Longitude,
-           Latitude)
+  net_load_zip(url, name)
 }
 
 
@@ -139,47 +74,280 @@ load_hd <- function(year)
 load_submissions <- function(year)
 {
   # download submission flags data via net
-  url <- str_c('https://nces.ed.gov/ipeds/datacenter/data/FLAGS', year, '.zip')
-  name <- str_c('flags', year, '.csv')
-  
-  df <-
-    net_load_zip(url, name) %>%
-    rename_all(tolower) %>%
-    filter(cohrtstu == '1') %>%
-    mutate(parent_id = ifelse(prch_f %in% c('1', '2', '3'), idx_f, unitid)) %>%
-    select(unitid,
-           parent_id)
+  if (year < 2004)
+    {
+      url <- str_c('https://nces.ed.gov/ipeds/datacenter/data/HD', year, '.zip')
+      name <- str_c('hd', year, '.csv')
+      
+      net_load_zip(url, name) %>%
+        select(unitid,
+               stat_fa,
+               stat_ic,
+               lock_ic,
+               stat_c,
+               lock_c,
+               prch_c,
+               idx_c,
+               imp_c,
+               stat_wi,
+               stat_ef,
+               lock_ef,
+               prch_ef,
+               idx_ef,
+               imp_ef,
+               pta99_ef,
+               ptb_ef,
+               ptc_ef,
+               ptd_ef,
+               pteeffy,
+               pteefia,
+               fyrpyear,
+               stat_sa,
+               lock_sa,
+               prch_sa,
+               idx_sa,
+               imp_sa,
+               stat_s,
+               lock_s,
+               prch_s,
+               idx_s,
+               imp_s,
+               stat_eap,
+               lock_eap,
+               prch_eap,
+               idx_eap,
+               imp_eap,
+               ftemp15,
+               sa_excl,
+               stat_sp,
+               form_f,
+               stat_f,
+               lock_f,
+               prch_f,
+               idx_f,
+               imp_f,
+               fybeg,
+               fyend,
+               gpfs,
+               f1gasbcr,
+               f1gasbal,
+               stat_sfa,
+               lock_sfa,
+               prch_sfa,
+               idx_sfa,
+               imp_sfa,
+               stat_gr,
+               lock_gr,
+               prch_gr,
+               idx_gr,
+               imp_gr,
+               cohrtstu,
+               pyaid,
+               cohrtaid,
+               sport1,
+               sport2,
+               sport3,
+               sport4,
+               sport5,
+               longpgm,
+               cohrtmt,
+               tpr,
+               hpr,
+               cufasb,
+               cugasb,
+               f1systyp,
+               f1sysnam,
+               fte,
+               ocrmsi,
+               ocrhsi,
+               twoyrcat,
+               rev_c,
+               rev_ef,
+               rev_sa,
+               rev_s,
+               rev_eap,
+               r_form_f,
+               rev_f,
+               rev_sfa,
+               rev_gr)
+  }
+  else
+  {
+    url <- str_c('https://nces.ed.gov/ipeds/datacenter/data/FLAGS', year, '.zip')
+    name <- str_c('flags', year, '.csv')
+    
+    net_load_zip(url, name)
+  }
+    
 }
 
 
 
 
-load_total_enrollment <- function(year)
+load_fall_enrollment <- function(year)
 {
   # download total fall enrollment data via net
-  url <- str_c('https://nces.ed.gov/ipeds/datacenter/data/EF', year - 1, 'A.zip')
-  name <- str_c('ef', year - 1, 'a.csv')
+  url <- str_c('https://nces.ed.gov/ipeds/datacenter/data/EF', year, 'A.zip')
+  name <- str_c('ef', year, 'a.csv')
   
-  df <-
-    net_load_zip(url, name) %>%
-    rename_all(tolower) %>%
-    filter(line == '1') 
+  recordset <-
+    net_load_zip(url, name)
   
-  if ('eftotlt' %in% colnames(df))
-  {
-    df <-
-      df %>%
-      mutate(`UG First-time First Year Enrollment` = as.numeric(eftotlt))
+  if (year < 2002) {
+    recordset <- 
+      recordset %>%
+      mutate(efalevel = recode(as.integer(line),
+                               `1` = 24,
+                               `3` = 25,
+                               `7` = 31,
+                               `11` = 32,
+                               `9` = 36,
+                               `15` = 44,
+                               `17` = 45,
+                               `21` = 51,
+                               `25` = 52,
+                               `23` = 56,
+                               .default = 99))
   }
-  else
-  {
-    df <-
-      df %>%
-      mutate(`UG First-time First Year Enrollment` = as.numeric(efrace15) + as.numeric(efrace16))
+  
+  if (year < 2008) {
+    recordset <- 
+      recordset %>%
+      filter(efalevel %in% c(24, 25, 31, 32, 36, 44, 45, 51, 52, 56)) %>%
+      mutate(efnralm = as.integer(efrace01),
+             efnralw = as.integer(efrace02),
+             efunknm = as.integer(efrace13),
+             efunknw = as.integer(efrace14),
+             efhispm = as.integer(efrace09),
+             efhispw = as.integer(efrace10),
+             efaianm = as.integer(efrace05),
+             efaianw = as.integer(efrace06),
+             efasiam = as.integer(efrace07),
+             efasiaw = as.integer(efrace08),
+             efbkaam = as.integer(efrace03),
+             efbkaaw = as.integer(efrace04),
+             efnhpim = as.integer(0),
+             efnhpiw = as.integer(0),
+             efwhitm = as.integer(efrace11),
+             efwhitw = as.integer(efrace12),
+             ef2morm = as.integer(0),
+             ef2morw = as.integer(0))
+    
   }
   
-  df %>%
-    select(unitid, `UG First-time First Year Enrollment`)
+  if (year == 2008) {
+    recordset <- 
+      recordset %>%
+      filter(efalevel %in% c(24, 25, 31, 32, 36, 44, 45, 51, 52, 56)) %>%
+      mutate(efnralm = as.integer(efnralm),
+             efnralw = as.integer(efnralw),
+             efunknm = as.integer(efunknm),
+             efunknw = as.integer(efunknw),
+             efhispm = as.integer(dvefhsm),
+             efhispw = as.integer(dvefhsw),
+             efaianm = as.integer(dvefaim),
+             efaianw = as.integer(dvefaiw),
+             efasiam = as.integer(dvefapm),
+             efasiaw = as.integer(dvefapw),
+             efbkaam = as.integer(dvefbkm),
+             efbkaaw = as.integer(dvefbkw),
+             efnhpim = as.integer(0),
+             efnhpiw = as.integer(0),
+             efwhitm = as.integer(dvefwhm),
+             efwhitw = as.integer(dvefwhw),
+             ef2morm = as.integer(0),
+             ef2morw = as.integer(0))
+  }
+  
+  if (year == 2009) {
+    recordset <- 
+      recordset %>%
+      filter(efalevel %in% c(24, 31, 32, 39, 40, 44, 51, 52, 59, 60)) %>%
+      mutate(efnralm = as.integer(efnralm),
+             efnralw = as.integer(efnralw),
+             efunknm = as.integer(efunknm),
+             efunknw = as.integer(efunknw),
+             efhispm = as.integer(dvefhsm),
+             efhispw = as.integer(dvefhsw),
+             efaianm = as.integer(dvefaim),
+             efaianw = as.integer(dvefaiw),
+             efasiam = as.integer(dvefapm),
+             efasiaw = as.integer(dvefapw),
+             efbkaam = as.integer(dvefbkm),
+             efbkaaw = as.integer(dvefbkw),
+             efnhpim = as.integer(0),
+             efnhpiw = as.integer(0),
+             efwhitm = as.integer(dvefwhm),
+             efwhitw = as.integer(dvefwhw),
+             ef2morm = as.integer(0),
+             ef2morw = as.integer(0))
+  }
+  
+  if (year > 2009) {
+    recordset <- 
+      recordset %>%
+      filter(efalevel %in% c(24, 31, 32, 39, 40, 44, 51, 52, 59, 60)) %>%
+      mutate(efnralm = as.integer(efnralm),
+             efnralw = as.integer(efnralw),
+             efunknm = as.integer(efunknm),
+             efunknw = as.integer(efunknw),
+             efhispm = as.integer(efhispm),
+             efhispw = as.integer(efhispw),
+             efaianm = as.integer(efaianm),
+             efaianw = as.integer(efaianw),
+             efasiam = as.integer(efasiam),
+             efasiaw = as.integer(efasiaw),
+             efbkaam = as.integer(efbkaam),
+             efbkaaw = as.integer(efbkaaw),
+             efnhpim = as.integer(efnhpim),
+             efnhpiw = as.integer(efnhpiw),
+             efwhitm = as.integer(efwhitm),
+             efwhitw = as.integer(efwhitw),
+             ef2morm = as.integer(ef2morm),
+             ef2morw = as.integer(ef2morw))
+  }
+  
+  recordset %>%
+    mutate(time_status = recode(efalevel,
+                                `24` = "Full-time",
+                                `25` = "Full-time",
+                                `31` = "Full-time",
+                                `32` = "Full-time",
+                                `36` = "Full-time",
+                                `39` = "Full-time",
+                                `40` = "Full-time",
+                                .default = "Part-time"),
+           career_level = recode(efalevel,
+                                 `32` = "Graduate",
+                                 `36` = "Graduate",
+                                 `52` = "Graduate",
+                                 `56` = "Graduate",
+                                 .default = "Undergraduate"),
+           degree_seeking = recode(efalevel,
+                                   `24` = "Degree-seeking",
+                                   `25` = "Degree-seeking",
+                                   `31` = "Non-degree-seeking",
+                                   `39` = "Degree-seeking",
+                                   `40` = "Degree-seeking",
+                                   `44` = "Degree-seeking",
+                                   `45` = "Degree-seeking",
+                                   `51` = "Non-degree-seeking",
+                                   `59` = "Degree-seeking",
+                                   `60` = "Degree-seeking",
+                                   .default = "Unknown"),
+           continuation_type = recode(efalevel,
+                                      `24` = "First-time",
+                                      `39` = "Transfer",
+                                      `40` = "Continuing",
+                                      `44` = "First-time",
+                                      `59` = "Transfer",
+                                      `60` = "Continuing",
+                                      .default = "Unknown")) %>%
+    select(unitid, time_status:continuation_type,
+           efnralm, efnralw, efunknm, efunknw, efhispm,
+           efhispw, efaianm, efaianw, efasiam, efasiaw,
+           efbkaam, efbkaaw, efnhpim, efnhpiw, efwhitm,
+           efwhitw, ef2morm, ef2morw)  
 }
 
 
