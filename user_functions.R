@@ -7,6 +7,16 @@ run_model <- function(fml, df) {
 
 
 
+collapse_year <-
+  function(year) {
+    # collapse year for fiscal years
+    str_c(str_sub(year - 1, 3 ,4),
+          str_sub(year, 3 ,4))
+  }
+
+
+
+
 net_load_zip <- function(file_url, file_name)
 {
   # access zipped data via net
@@ -33,16 +43,6 @@ net_load_zip <- function(file_url, file_name)
   
   return(data)
 }
-
-
-
-
-collapse_year <-
-  function(year) {
-    # collapse year for fiscal years
-    str_c(str_sub(year - 1, 3 ,4),
-          str_sub(year, 3 ,4))
-  }
 
 
 
@@ -140,36 +140,7 @@ load_submissions <- function(year)
                lock_gr,
                prch_gr,
                idx_gr,
-               imp_gr,
-               cohrtstu,
-               pyaid,
-               cohrtaid,
-               sport1,
-               sport2,
-               sport3,
-               sport4,
-               sport5,
-               longpgm,
-               cohrtmt,
-               tpr,
-               hpr,
-               cufasb,
-               cugasb,
-               f1systyp,
-               f1sysnam,
-               fte,
-               ocrmsi,
-               ocrhsi,
-               twoyrcat,
-               rev_c,
-               rev_ef,
-               rev_sa,
-               rev_s,
-               rev_eap,
-               r_form_f,
-               rev_f,
-               rev_sfa,
-               rev_gr)
+               imp_gr)
   }
   else
   {
@@ -226,12 +197,12 @@ load_fall_enrollment <- function(year)
              efasiaw = as.integer(efrace08),
              efbkaam = as.integer(efrace03),
              efbkaaw = as.integer(efrace04),
-             efnhpim = as.integer(0),
-             efnhpiw = as.integer(0),
+             efnhpim = 0,
+             efnhpiw = 0,
              efwhitm = as.integer(efrace11),
              efwhitw = as.integer(efrace12),
-             ef2morm = as.integer(0),
-             ef2morw = as.integer(0))
+             ef2morm = 0,
+             ef2morw = 0)
     
   }
   
@@ -251,12 +222,12 @@ load_fall_enrollment <- function(year)
              efasiaw = as.integer(dvefapw),
              efbkaam = as.integer(dvefbkm),
              efbkaaw = as.integer(dvefbkw),
-             efnhpim = as.integer(0),
-             efnhpiw = as.integer(0),
+             efnhpim = 0,
+             efnhpiw = 0,
              efwhitm = as.integer(dvefwhm),
              efwhitw = as.integer(dvefwhw),
-             ef2morm = as.integer(0),
-             ef2morw = as.integer(0))
+             ef2morm = as.integer(ef2morm),
+             ef2morw = as.integer(ef2morm))
   }
   
   if (year == 2009) {
@@ -275,12 +246,12 @@ load_fall_enrollment <- function(year)
              efasiaw = as.integer(dvefapw),
              efbkaam = as.integer(dvefbkm),
              efbkaaw = as.integer(dvefbkw),
-             efnhpim = as.integer(0),
-             efnhpiw = as.integer(0),
+             efnhpim = 0,
+             efnhpiw = 0,
              efwhitm = as.integer(dvefwhm),
              efwhitw = as.integer(dvefwhw),
-             ef2morm = as.integer(0),
-             ef2morw = as.integer(0))
+             ef2morm = as.integer(ef2morm),
+             ef2morw = as.integer(ef2morm))
   }
   
   if (year > 2009) {
@@ -356,15 +327,10 @@ load_fall_enrollment <- function(year)
 load_state_enrollment <- function(year)
 {
   # download state fall enrollment data via net
-  url <- str_c('https://nces.ed.gov/ipeds/datacenter/data/EF', year - 1, 'C.zip')
-  name <- str_c('ef', year - 1, 'c.csv')
+  url <- str_c('https://nces.ed.gov/ipeds/datacenter/data/EF', year, 'C.zip')
+  name <- str_c('ef', year, 'c.csv')
   
-  df <-
-    net_load_zip(url, name) %>%
-    rename_all(tolower) %>%
-    filter(!line %in% c('58', '99')) %>%
-    mutate(efres01 = as.numeric(efres01)) %>%
-    select(unitid, line, efres01)
+  net_load_zip(url, name)
 }
 
 
@@ -373,14 +339,10 @@ load_state_enrollment <- function(year)
 load_retention <- function(year)
 {
   # download retention data via net
-  url <- str_c('https://nces.ed.gov/ipeds/datacenter/data/EF', year - 1, 'D.zip')
-  name <- str_c('ef', year - 1, 'd.csv')
+  url <- str_c('https://nces.ed.gov/ipeds/datacenter/data/EF', year, 'D.zip')
+  name <- str_c('ef', year, 'd.csv')
   
-  df <-
-    net_load_zip(url, name) %>%
-    rename_all(tolower) %>%
-    # mutate(`UG First-time First Year Enrollment` = as.numeric(grcohrt)) %>%
-    select(unitid, ret_pcf)
+  net_load_zip(url, name)
 }
 
 
@@ -389,13 +351,15 @@ load_retention <- function(year)
 load_charges <- function(year)
 {
   # download academic year charges data via net
-  url <- str_c('https://nces.ed.gov/ipeds/datacenter/data/IC', year - 1, '_AY.zip')
-  name <- str_c('ic', year - 1, '_ay.csv')
+  url <- str_c('https://nces.ed.gov/ipeds/datacenter/data/IC', year, '_AY.zip')
+  name <- str_c('ic', year, '_ay.csv')
   
-  df <-
-    net_load_zip(url, name) %>%
-    rename_all(tolower) %>%
-    select(unitid, tuition2, tuition3)
+  net_load_zip(url, name) %>%
+    pivot_longer(cols = -unitid,
+                 names_to = 'field',
+                 values_to = 'value',
+                 values_drop_na = TRUE) %>%
+    mutate(value = as.numeric(value))
 }
 
 
@@ -411,11 +375,12 @@ load_sfa <- function(year)
                 collapse_year(year),
                 '.csv')
   
-  df <-
-    net_load_zip(url, name) %>%
-    rename_all(tolower) %>%
-    replace_na(replace = list(igrnt_t = 0)) %>%
-    select(unitid, igrnt_t)
+  net_load_zip(url, name) %>%
+    pivot_longer(cols = -unitid,
+                 names_to = 'field',
+                 values_to = 'value',
+                 values_drop_na = TRUE) %>%
+    mutate(value = as.numeric(value))
 }
 
 
@@ -432,12 +397,11 @@ load_fasb <- function(year)
                 '_f2.csv')
   
   net_load_zip(url, name) %>%
-    rename_all(tolower) %>%
-    select(unitid, 
-           `State Appropriations` = f2d03,
-           `Total Expenses` = f2e131, 
-           `Hospital Expenses` = f2e091, 
-           `Endowment EOY` = f2h02)
+    pivot_longer(cols = -unitid,
+                 names_to = 'field',
+                 values_to = 'amount',
+                 values_drop_na = TRUE) %>%
+    mutate(amount = as.double(amount))
 }
 
 
@@ -454,11 +418,10 @@ load_gasb <- function(year)
                 '_f1a.csv')
   
   net_load_zip(url, name) %>%
-    rename_all(tolower) %>%
-    select(unitid,
-           `State Appropriations` = f1b11,
-           `Total Expenses` = f1c191, 
-           `Hospital Expenses` = f1c121, 
-           `Endowment EOY` = f1h02)
+    pivot_longer(cols = -unitid,
+                 names_to = 'field',
+                 values_to = 'amount',
+                 values_drop_na = TRUE) %>%
+    mutate(amount = as.double(amount))
 }
 
