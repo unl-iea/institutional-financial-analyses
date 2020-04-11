@@ -12,8 +12,8 @@ The script(s) in this project utilize a SQLite db that is created in the root di
 
 The main script is **zemsky_stress_scores_nces.Rmd** and will access the SQLite database that was created in the previous step.  It analyzes an eight-year window of data ending with the collection year set in the parameter _year_ at the top of the page.  It outputs two datafiles:
 
-* metrics.csv: contains each institution's values for all eight years that are analyzed.
-* stress.csv: stress scores for each institution.
+* _metrics.csv_: contains each institution's metric values for all eight years that are analyzed.
+* _stress.csv_: stress scores for each institution.
 
 RStudio will also knit an HTML version of the notebook in the project directory.
 
