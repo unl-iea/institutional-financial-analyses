@@ -12,44 +12,86 @@ params:
 ```{r setup}
 # libraries
 library(knitr)
-library(reticulate)
+library(DBI)
+library(odbc)
+library(dbplyr)
+library(RSQLite)
 library(lubridate)
+library(broom)
 library(tidyverse)
+
 # set default document options
 knitr::opts_chunk$set(fig.width = 8,
                       fig.asp = 0.618,
                       echo = TRUE,
-                      warning = FALSE)
-knitr::knit_engines$set(python = reticulate::eng_python)
+                      warning = FALSE,
+                      message = FALSE,
+                      collapse = TRUE)
+
 # set random seed
 set.seed(1965)
-# access zipped data via net
-net_load_zip <- function(file_url, file_name)
-{
-  #Download data file
-  temp <- tempfile()
-  
-  download.file(file_url,
-                temp)
-  
-  files <- unzip(temp, list = TRUE)
-  spec <- files$Name[str_detect(files$Name, "_rv")]
-  file_name <- ifelse(length(spec) == 0, file_name, spec)
-  
-  data <- 
-    read_csv(unz(temp, file_name),
-             locale = locale(encoding = "latin1"),
-             col_types = cols(.default = col_character())) %>%
-    rename_all(tolower)
-  
-  unlink(temp)
-  rm(temp)
-  
-  return(data)
-}
-# base tibble
-years <-
-  tibble(`Fiscal Year` = seq(params$year - 4, params$year))
+
+# capture year_param for queries
+year_param <- params$year
+
+# EF headcount FTE weights
+# see 'Calculation of FTE students (using fall student heacounts) in
+#    https://surveys.nces.ed.gov/ipeds/VisGlossaryAll.aspx
+weights <-
+  tribble(~time_status, ~career_level, ~Control, ~Level, ~weight,
+          # full-time weights are all 1.0
+          'Full-time', 'Undergraduate', 'Public', 1, 1.0,
+          'Full-time', 'Undergraduate', 'Public', 2, 1.0,
+          'Full-time', 'Undergraduate', 'Public', 3, 1.0,
+          'Full-time', 'Undergraduate', 'Public', -3, 1.0,
+          'Full-time', 'Graduate', 'Public', 1, 1.0,
+          'Full-time', 'Graduate', 'Public', 2, 1.0,
+          'Full-time', 'Graduate', 'Public', 3, 1.0,
+          'Full-time', 'Graduate', 'Public', -3, 1.0,
+          'Full-time', 'Undergraduate', 'Private', 1, 1.0,
+          'Full-time', 'Undergraduate', 'Private', 2, 1.0,
+          'Full-time', 'Undergraduate', 'Private', 3, 1.0,
+          'Full-time', 'Undergraduate', 'Private', -3, 1.0,
+          'Full-time', 'Graduate', 'Private', 1, 1.0,
+          'Full-time', 'Graduate', 'Private', 2, 1.0,
+          'Full-time', 'Graduate', 'Private', 3, 1.0,
+          'Full-time', 'Graduate', 'Private', -3, 1.0,
+          'Full-time', 'Undergraduate', 'For-profit', 1, 1.0,
+          'Full-time', 'Undergraduate', 'For-profit', 2, 1.0,
+          'Full-time', 'Undergraduate', 'For-profit', 3, 1.0,
+          'Full-time', 'Undergraduate', 'For-profit', -3, 1.0,
+          'Full-time', 'Graduate', 'For-profit', 1, 1.0,
+          'Full-time', 'Graduate', 'For-profit', 2, 1.0,
+          'Full-time', 'Graduate', 'For-profit', 3, 1.0,
+          'Full-time', 'Graduate', 'For-profit', -3, 1.0,
+          # part-time
+          'Part-time', 'Undergraduate', 'Public', 1, 0.403543,
+          'Part-time', 'Undergraduate', 'Public', 2, 0.335737,
+          'Part-time', 'Undergraduate', 'Public', 3, 0.335737,
+          'Part-time', 'Undergraduate', 'Public', -3, 0.382059,
+          'Part-time', 'Graduate', 'Public', 1, 0.361702,
+          'Part-time', 'Graduate', 'Public', 2, 0.335737,
+          'Part-time', 'Graduate', 'Public', 3, 0.335737,
+          'Part-time', 'Graduate', 'Public', -3, 0.335737,
+          'Part-time', 'Undergraduate', 'Private', 1, 0.392857,
+          'Part-time', 'Undergraduate', 'Private', 2, 0.335737,
+          'Part-time', 'Undergraduate', 'Private', 3, 0.335737,
+          'Part-time', 'Undergraduate', 'Private', -3, 0.335737,
+          'Part-time', 'Graduate', 'Private', 1, 0.382059,
+          'Part-time', 'Graduate', 'Private', 2, 0.335737,
+          'Part-time', 'Graduate', 'Private', 3, 0.335737,
+          'Part-time', 'Graduate', 'Private', -3, 0.335737,
+          'Part-time', 'Undergraduate', 'For-profit', 1, 0.392857,
+          'Part-time', 'Undergraduate', 'For-profit', 2, 0.335737,
+          'Part-time', 'Undergraduate', 'For-profit', 3, 0.335737,
+          'Part-time', 'Undergraduate', 'For-profit', -3, 0.335737,
+          'Part-time', 'Graduate', 'For-profit', 1, 0.382059,
+          'Part-time', 'Graduate', 'For-profit', 2, 0.335737,
+          'Part-time', 'Graduate', 'For-profit', 3, 0.335737,
+          'Part-time', 'Graduate', 'For-profit', -3, 0.335737)
+
+# open database connection
+db <- dbConnect(RSQLite::SQLite(), str_c(getwd(), 'data/db.sqlite', sep='/'))
 ```
 
 # Read Data
@@ -58,82 +100,74 @@ years <-
 
 ```{r}
 # access data via net
-load_hd <- function(year)
-{
-  url <- str_c('https://nces.ed.gov/ipeds/datacenter/data/HD', year - 1, '.zip')
-  name <- str_c('hd', year - 1, '.csv')
-  
-  net_load_zip(url, name) %>%
-    rename_all(tolower) %>%
-    mutate(Control = recode(control,
-                            '1' = 'Public',
-                            '2' = 'Private',
-                            '3' = 'Proprietary',
-                            .default = 'Unknown'),
-           deathyr = as.integer(deathyr),
-           Closed = ifelse(deathyr < 0, 0, 1),
-           `Close Year` = ifelse(Closed == 1,
-                                 deathyr,
-                                 NA),
-           `Close Date` = ifelse(closedat == '-2',
-                                 NA,
-                                 closedat)) %>%
-    select(unitid,
-           opeid,
-           `Institution Name` = instnm,
-           City = city,
-           State = stabbr,
-           Control,
-           Closed,
-           `Close Year`,
-           `Close Date`)
-}
 system.time({
-  institutions <- 
-    years %>%
-    mutate(data = map(`Fiscal Year`, load_hd)) %>%
-    unnest(cols = data)
-  
-  institutions <-
-    institutions %>%
-    group_by(unitid) %>%
-    summarize(`Fiscal Year` = max(`Fiscal Year`)) %>%
-    ungroup() %>%
-    inner_join(institutions, by = c('unitid', 'Fiscal Year')) %>%
-    select(-`Fiscal Year`) %>%
-    mutate(`Close Date` = as_date(`Close Date`, tz = 'GMT', format='%m/%d/%Y'))
+  ic <-
+   tbl(db, 'characteristics') %>%
+   filter(distnced == 0,
+          ft_ug == 1) %>%
+   select(unitid, year_key)
+
+   institutions <- 
+   tbl(db, 'directory') %>%
+   filter(level_institution == 1,
+          bea_region < 9,
+          title4_eligible == 1,
+          degree_granting == 1,
+          control %in% 1:2)
+    
+ institutions <-
+   institutions %>%
+   inner_join(ic, by = c('unitid', 'year_key')) %>%
+   group_by(unitid) %>%
+   summarize(year_key = max(year_key)) %>%
+   ungroup() %>%
+   inner_join(institutions, by = c('unitid', 'year_key')) %>%
+   mutate(close_year = ifelse(close_year > 0, close_year, NA),
+          Closed = ifelse(is.na(close_year), 0, 1)) %>%
+   select(unitid,
+          `Institution Name` = institution_name,
+          City = city,
+          State = state,
+          FIPS = fips,
+          Level = level_institution,
+          Control = control,
+          Closed,
+          `Close Year` = close_year,
+          `Close Date` = close_date,
+          Longitude = longitude,
+          Latitude = latitude) %>%
+   collect() %>%
+   mutate(Control = recode(Control,
+                           `1` = 'Public',
+                           `2` = 'Private',
+                           .default = 'Unknown'),
+          `Close Date` = as_date(`Close Date`, tz = 'GMT', format='%m/%d/%Y'))
+
+  # housekeeping
+  rm(ic)
 })
+          
 ```
 
-## IPEDS 12-Month Instructional Activity
+## Fall Enrollment
 
 ```{r}
-# access data via net
-load_efia <- function(year)
-{
-  url <- str_c('https://nces.ed.gov/ipeds/datacenter/data/efia', year, '.zip')
-  name <- str_c('efia', year, '.csv')
-  
-  net_load_zip(url, name) %>%
-    rename_all(tolower) %>%
-    replace_na(list(fteug = '0',
-                    ftegd = '0',
-                    ftedpp = '0')) %>%
-    mutate(fteug = as.numeric(fteug),
-           ftegd = as.numeric(ftegd),
-           ftedpp = as.numeric(ftedpp),
-           FTE = fteug + ftegd + ftedpp) %>%
-    select(unitid,
-           `Undergraduate FTE` = fteug,
-           `Graduate FTE` = ftegd,
-           `Prof Doctorate FTE` = ftedpp,
-           FTE)
-}
 system.time({
-  fte <- 
-    years %>%
-    mutate(data = map(`Fiscal Year`, load_efia)) %>%
-    unnest(cols = data)
+  # flags to roll up enrollments to match finance
+  submissions <-
+    tbl(db, 'submissions') %>%
+    filter(year_key >= year_param) %>%
+    mutate(parent_id = ifelse(prch_f %in% c('1', '2', '3'), idx_f, unitid)) %>%
+    select(unitid, year_key, parent_id)
+  
+  # total_enrollment = fall enrollment (EF) table
+  total_enrollment <-
+    tbl(db, 'fall_enrollment') %>%
+    inner_join(submissions, by = c('unitid', 'year_key')) %>%
+    group_by(parent_id, year_key, time_status, career_level) %>%
+    summarize(headcount = sum(headcount, na.rm = TRUE)) %>%
+    rename(unitid = parent_id) %>%
+    collect()
 })
 ```
 
@@ -141,111 +175,170 @@ system.time({
 
 ```{r}
 # access data via net
-load_fasb <- function(year)
-{
-  url <- str_c('https://nces.ed.gov/ipeds/datacenter/data/F', year - 2001, year - 2000, '_F2.zip')
-  name <- str_c('f', year - 2001, year - 2000, '_f2.csv')
+system.time({
+  gdp <-
+    tbl(db, 'gdp') %>%
+    filter(year_key >= year_param,
+           month == 4) %>%
+    select(year_key, gdp)
+
+    finance <- 
+      tbl(db, 'finance') %>%
+      inner_join(gdp, by = 'year_key') %>%
+      filter(field %in% c('f2b01', 'f2b02', 'f2d01', 'f2a03a', 'f2a17',
+                          'f2a18', 'f2c05', 'f2c06', 'f2c08', 'f2c10',
+                          'f2d01', 'f2e135', 'f2h02',
+                          'f1d01', 'f1d02', 'f1a07', 'f1a27t4',
+                          'f1a284', 'f1e05', 'f1e06', 'f1e08', 'f1e10',
+                          'f1b01', 'f1c19dp', 'f1h02')) %>%
+      collect() %>%
+      mutate(amount = ifelse(is.na(amount), 0, amount / gdp),
+             field = recode(field,
+                            'f2b01' = 'Total Revenues',
+                            'f2b02' = 'Total Expenses',
+                            'f2a03a' = 'Total Debt',
+                            'f2a17' = 'Total Plant',
+                            'f2a18' = 'Accumulated Depreciation',
+                            'f2c05' = 'Institutional Grants (Funded)',
+                            'f2c06' = 'Institutional Grants (Unfunded)',
+                            'f2c08' = 'Allowances to Tuition and Fees',
+                            'f2c10' = 'Total Discounts',
+                            'f2d01' = 'Tuition Revenue',
+                            'f2e135' = 'Depreciation Expense',
+                            'f2h02' = 'Endowment EOY',
+                            'f1d01' = 'Total Revenues',
+                            'f1d02' = 'Total Expenses',
+                            'f1a07' = 'Total Debt',
+                            'f1a27t4' = 'Total Plant',
+                            'f1a284' = 'Accumulated Depreciation',
+                            'f1e05' = 'Institutional Grants (Funded)',
+                            'f1e06' = 'Institutional Grants (Unfunded)',
+                            'f1e08' = 'Allowances to Tuition and Fees',
+                            'f1e10' = 'Total Discounts',
+                            'f1b01' = 'Tuition Revenue',
+                            'f1c19dp' = 'Depreciation Expense',
+                            'f1h02' = 'Endowment EOY')) %>%
+      select(-gdp) %>%
+      pivot_wider(names_from = field,
+                  values_from = amount)
+    
+    rm(gdp)
+})
+```
+
+## Get Year Labels
+
+```{r}
+# access data via net
+system.time({
+  years <- 
+    tbl(db, 'ipeds_years') %>%
+    select(year_key,
+           fiscal_year,
+           academic_year,
+           calendar_year_fall) %>%
+    collect()
+})
+
+```
+
+```{r}
+# Disconnect database
+dbDisconnect(db)
   
-  net_load_zip(url, name) %>%
-    rename_all(tolower) %>%
-    select(-starts_with('x')) %>%
-    pivot_longer(cols = 2:ncol(.),
-                 names_to = 'field_code',
-                 values_to = 'amount') %>%
-    replace_na(list(amount = '0')) %>%
-    mutate(amount = as.integer(amount))
-}
-system.time({
-  fasb_files <- 
-    years %>%
-    mutate(accounting_standard = 'FASB',
-           data = map(`Fiscal Year`, load_fasb))
-})
+# housekeeping
+rm(submissions, db)
 ```
 
-## IPEDS Finance Field Labels
+## Estimate FTE from Fall Enrollment Counts
 
 ```{r}
-system.time({
-  fields <-
-    read_csv('data/ipeds_f2_fields.csv',
-             col_types = cols(.default = col_character())) %>%
-    filter(str_sub(field_code, 1, 1) != 'x')
- 
-  # reduce to single label per code, last one in wins 
-  fields <-
-    fields %>%
-    group_by(field_code) %>%
-    summarize(fiscal_year = max(fiscal_year)) %>%
-    ungroup() %>%
-    inner_join(fields, by = c('fiscal_year', 'field_code')) %>%
-    select(-fiscal_year)
-})
-```
+fte <-
+  total_enrollment %>%
+  inner_join(institutions, by = c('unitid')) %>%
+  inner_join(weights, by = c('time_status', 
+                             'career_level',
+                             'Control',
+                             'Level')) %>%
+  mutate(fte = headcount * weight) %>%
+  group_by(unitid, year_key, career_level) %>%
+  summarize(Headcount = sum(headcount, na.rm = TRUE),
+            FTE = sum(fte, na.rm = TRUE)) %>%
+  ungroup() %>%
+  pivot_wider(names_from = career_level,
+              values_from = c(Headcount, FTE)) %>%
+  replace_na(replace = list(Headcount_Graduate = 0,
+                            Headcount_Undergraduate = 0,
+                            FTE_Graduate = 0,
+                            FTE_Undergraduate = 0)) %>%
+  mutate(`Total FTE` = FTE_Undergraduate + FTE_Graduate,
+         `Total Heacount` = Headcount_Undergraduate + Headcount_Graduate)
 
-### Output Reduced Fields File
-
-```{r}
-system.time({
-  fields %>%
-    write_csv('data/reduced_fields.csv',
-              na = '')
-})
-```
-
-# Financial Responsibility Composite Scores
-
-```{r}
-system.time({
-  scores <-
-    read_csv('data/fin_resp_data.csv',
-             col_types = cols(.default = col_character(),
-                              composite_year = col_integer(),
-                              composite_score = col_double())) %>%
-    mutate(`Fiscal Year` = composite_year + 1) %>%
-    select(unitid,
-           `Fiscal Year`,
-           `Composite Score` = composite_score)
-})
+rm(total_enrollment, weights)
 ```
 
 # Merge Files
 
 ```{r}
 metrics <-
-  fasb_files %>%
-  unnest(cols = data) %>%
-  inner_join(fields, by = 'field_code') %>%
-  filter(field_code %in% c('f2b01', 'f2b02', 'f2d01', 'f2a03a', 'f2a17',
-                           'f2a18', 'f2c05', 'f2c06', 'f2c08', 'f2c10',
-                           'f2d10', 'f2e135', 'f2h01', 'f2h02')) %>%
-  select(-accounting_standard, -field_code) %>%
-  pivot_wider(names_from = 'field_label',
-              values_from = 'amount',
-              values_fill = list(amount = 0)) %>%
-  inner_join(fte, by = c('unitid', 'Fiscal Year')) %>%
-  left_join(scores, by = c('unitid', 'Fiscal Year')) %>%
-  inner_join(institutions, ., by = c('unitid')) %>%
-  rename(Unitid = unitid)
+  institutions %>%
+  inner_join(fte, by = c('unitid')) %>%
+  inner_join(finance, by = c('unitid', 'year_key')) %>%
+  inner_join(years, by = 'year_key') %>%
+  select(-year_key) %>%
+  rename(Unitid = unitid,
+         `Fiscal Year` = fiscal_year,
+         `Academic Year` = academic_year,
+         `Calendar Year (Fall)` = calendar_year_fall) %>%
+  mutate(Margin = `Total Revenues` - `Total Expenses`,
+         `Margin per FTE (000)` = Margin / 1000 / `Total FTE`,
+         `Gross tuition` = `Tuition Revenue` + `Allowances to Tuition and Fees`,
+         `Tuition dependence` = `Tuition Revenue` / `Total Revenues`,
+         `Discount rate` = `Allowances to Tuition and Fees` / `Gross tuition`,
+         `Percentage of Grants from Unfunded Sources` = `Institutional Grants (Unfunded)` / `Total Discounts`,
+         `Age of Plant` = `Accumulated Depreciation` / `Depreciation Expense`)
+
 metrics %>%
   write_csv('data/ipeds_metrics.csv',
             na = '')
 ```
 
-# Plots
+# References
 
 ```{r}
-metrics %>%
-  mutate(Margin = `Total revenues and investment return` - `Total expenses`,
-         `Margin per FTE (000)` = Margin / 1000 / FTE,
-         `Gross tuition` = `Tuition and fees - Total` + `Allowances applied to tuition and fees`,
-         `Tuition dependence` = `Tuition and fees - Total` / `Total revenues and investment return`,
-         `Discount rate` = `Allowances applied to tuition and fees` / `Gross tuition`,
-         `Unfunded discount rate` = `Institutional grants (unfunded)` / `Gross tuition`) %>%
-  filter(`Fiscal Year` == params$year,
-         Closed == 0) %>%
-  mutate(`Margin Group` = ifelse(`Margin per FTE (000)` > 0, 'Profitable', 'Unprofitable'),
-         `Margin Group` = ifelse(`Margin per FTE (000)` == 0, 'Even', `Margin Group`)) %>%
-  ggplot(aes(x = `Discount rate`, y = `Tuition dependence`, color = `Margin Group`)) +
-    geom_point(alpha = 1/5)
+citation('base')
+citation('broom')
+citation('DBI')
+citation('dbplyr')
+citation('knitr')
+citation('lubridate')
+citation('odbc')
+citation('RSQLite')
+citation('tidyverse')
 ```
+
+Built with R version `r getRversion()`.
+
+Packages and versions:
+
+broom `r packageVersion('broom')`.
+
+DBI `r packageVersion('DBI')`.
+
+dbplyr `r packageVersion('dbplyr')`.
+
+dplyr `r packageVersion('dplyr')`.
+
+ggplot `r packageVersion('ggplot2')`.
+
+lubridate `r packageVersion('lubridate')`.
+
+odbc `r packageVersion('odbc')`.
+
+purrr `r packageVersion('purrr')`.
+
+RSQLite `r packageVersion('RSQLite')`.
+
+tidyr `r packageVersion('tidyr')`.
+
+tidyverse `r packageVersion('tidyverse')`.
