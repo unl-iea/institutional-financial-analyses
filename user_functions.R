@@ -33,6 +33,7 @@ net_load_zip <- function(file_url, file_name)
   
   data <- 
     read_csv(unz(temp, file_name),
+             quote = '\"',
              locale = locale(encoding = "latin1"),
              col_types = cols(.default = col_character())) %>%
     rename_all(tolower) %>%
