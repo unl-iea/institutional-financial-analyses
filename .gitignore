@@ -45,6 +45,6 @@ reduced_fields.csv
 .DS_Store
 metrics.csv
 stress.csv
-db.sqlite
+*.sqlite
 scraps.txt
 TEST.R
