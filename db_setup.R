@@ -24,7 +24,7 @@ recent_year <- 2018
 
 
 # create a file database (db) to store IPEDS data
-db <- dbConnect(RSQLite::SQLite(), "db.sqlite")
+db <- dbConnect(RSQLite::SQLite(), str_c(getwd(), 'data/db.sqlite', sep='/'))
 
 
 
@@ -51,6 +51,8 @@ system.time({
   # housekeeping
   rm(gdp)
 })
+
+
 
 
 # grab directory information for IPEDS universe
@@ -143,6 +145,10 @@ system.time({
     mutate(value = as.numeric(value)) %>%
     pivot_wider(names_from = field,
                 values_from = value) %>%
+    mutate(deathyr = ifelse(deathyr > 0, deathyr, NA),
+           closedat = ifelse(closedat == '-2',
+                             NA,
+                             closedat)) %>%
     rename(institution_name = instnm,
            state = stabbr,
            bea_region = obereg,
@@ -171,7 +177,6 @@ system.time({
            country_fips = countycd,
            country_name = countynm,
            longitude = longitud)
-  
   
   # write table to db
   dbWriteTable(db, "directory", directory, overwrite=TRUE)

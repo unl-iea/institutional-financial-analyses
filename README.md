@@ -8,14 +8,16 @@ Zemsky, R., Shaman, S., Campbell Baldridge, S. (2020). _The College Stress Test:
 
 ## Using This Repo
 
-The script(s) in this project utilize a SQLite db that is created in the root directory by the script **data_setup.R**.  _You should only need to run this script once_.
+The script(s) in this project utilize a SQLite db that is created in the root directory by the script **db_setup.R**.  _You should only need to run this script once_.
 
 The main script is **zemsky_stress_scores_nces.Rmd** and will access the SQLite database that was created in the previous step.  It analyzes an eight-year window of data ending with the collection year set in the parameter _year_ at the top of the page.  It outputs two datafiles:
 
 * _metrics.csv_: contains each institution's metric values for all eight years that are analyzed.
 * _stress.csv_: stress scores for each institution.
 
-RStudio will also knit an HTML version of the notebook in the project directory.
+The second script, **ipeds_financial_metrics_nces.Rmd** uses the database to create more traditional financial metrics for publics and privates.  It does a _naive_ union of FASB and GASB information -- for example, treating the debt measures as a single measure and overlooking differences in unfunded and unrestricted for financial aid allowances.  For simple listings, it should give a "quick and dirty" indication of institutions that may be under duress during the crisis.  This script produces the file _ipeds_metrics.csv_, which you will find in the /data directory after running.
+
+RStudio will also knit an HTML version of the each notebook in the project directory.
 
 ## Built With
 

@@ -104,7 +104,7 @@ source(file="user_functions.R")
 ```{r}
 system.time({
   # create a file database (db) to store IPEDS data
-  db <- dbConnect(RSQLite::SQLite(), "db.sqlite")
+  db <- dbConnect(RSQLite::SQLite(), str_c(getwd(), 'data/db.sqlite', sep='/'))
   
   ic <-
     tbl(db, 'characteristics') %>%
@@ -608,9 +608,13 @@ Zemsky, R., Shaman, S., Campbell Baldridge, S. (2020). _The College Stress Test:
 
 ```{r}
 citation('base')
+citation('broom')
+citation('DBI')
+citation('dbplyr')
 citation('knitr')
 citation('lubridate')
-citation('broom')
+citation('odbc')
+citation('RSQLite')
 citation('tidyverse')
 ```
 
