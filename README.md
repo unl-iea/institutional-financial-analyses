@@ -15,7 +15,9 @@ The main script is **zemsky_stress_scores_nces.Rmd** and will access the SQLite 
 * _metrics.csv_: contains each institution's metric values for all eight years that are analyzed.
 * _stress.csv_: stress scores for each institution.
 
-RStudio will also knit an HTML version of the notebook in the project directory.
+The second script, **ipeds_financial_metrics_nces.Rmd** uses the database to create more traditional financial metrics for publics and privates.  It does a _naive_ union of FASB and GASB information -- for example, treating the debt measures as a single measure and overlooking differences in unfunded and unrestricted for financial aid allowances.  For simple listings, it should give a "quick and dirty" indication of institutions that may be under duress during the crisis.  This script produces the file _ipeds_metrics.csv_, which you will find in the /data directory after running.
+
+RStudio will also knit an HTML version of the each notebook in the project directory.
 
 ## Built With
 
