@@ -281,7 +281,14 @@ system.time({
     ipeds_years %>%
     mutate(data = map(collection_year, load_retention),
            year_key = collection_year + 1) %>%
-    unnest(cols = data) %>%
+    unnest(cols = data)
+  
+  if(!'grcohort' %in% colnames(retention)) {
+    retention$grcohort <- 0
+  }
+  
+  retention <-
+    retention %>%
     mutate(gradrate_cohort = as.integer(grcohort),
            entering_undergraduates = as.integer(ugentern),
            percentage_of_class = as.numeric(pgrcohrt),
