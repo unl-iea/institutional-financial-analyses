@@ -239,7 +239,7 @@ system.time({
 
 
 
-# grab subission flags 
+# grab submission flags 
 system.time({
   submissions <-
     ipeds_years %>%
@@ -285,7 +285,8 @@ system.time({
     mutate(data = map(collection_year, load_state_enrollment),
            year_key = collection_year + 1) %>%
     unnest(cols = data) %>%
-    filter(!line %in% c('58', '99')) %>%
+    filter(!efcstate %in% c('58', '99'),
+           line != '999') %>%
     mutate(fips = as.integer(line),
            `Other First-time` = as.numeric(efres01) - as.numeric(efres02),
            `Recent HS Graduates` = as.numeric(efres02)) %>%
