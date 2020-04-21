@@ -8,7 +8,7 @@ Zemsky, R., Shaman, S., Campbell Baldridge, S. (2020). _The College Stress Test:
 
 ## Using This Repo
 
-The script(s) in this project utilize a SQLite db that is created in the root directory by the script **db_setup.R**.  _You should only need to run this script once_.
+The script(s) in this project utilize a SQLite db that is created in the root directory by the script **db_setup.R**.  _You should only need to run this script once_.  It may take a while to finish running, as it downloads several years worth of datafiles from the NCES website as it populates the database.  Be sure to create a subfolder named "data" in your project folder before running.
 
 The main script is **zemsky_stress_scores_nces.Rmd** and will access the SQLite database that was created in the previous step.  It analyzes an eight-year window of data ending with the collection year set in the parameter _year_ at the top of the page.  It outputs two datafiles:
 
