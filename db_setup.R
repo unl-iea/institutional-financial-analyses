@@ -4,6 +4,35 @@
 #                                                                 #
 ###################################################################
 
+# create data directory
+system.time({
+  if (!dir.exists(str_c(getwd(), 'data', sep='/'))) {
+    dir.create(str_c(getwd(), 'data', sep='/'))
+  }
+})
+
+
+
+# install packages (optional)
+# I'd advise doing this by hand, but here is a bit of code to do this in one pass
+# should you prefer.
+# COMMENT TO DEATIVATE
+system.time({
+  packages <-
+    c('RSQLite',
+      'knitr',
+      'DBI',
+      'odbc',
+      'dbplyr',
+      'lubridate',
+      'broom',
+      'tidyverse')
+  
+  for (pkg in packages) {
+    if(pkg %in% rownames(installed.packages()) == FALSE) install.packages(pkg, dependencies = TRUE)
+  }
+})
+
 # libraries
 library(DBI)
 library(odbc)
@@ -42,8 +71,9 @@ system.time({
     rename_all(tolower) %>%
     mutate(date = as_date(date),
            year_key = ifelse(month(date) > 6, year(date) + 1, year(date)),
+           month = month(date),
            gdp = as.double(gdpdef) / 100) %>%
-    select(year_key, date, gdp)
+    select(year_key, month, date, gdp)
 
   # write table to db
   dbWriteTable(db, "gdp", gdp, overwrite=TRUE)
