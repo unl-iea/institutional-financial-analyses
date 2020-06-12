@@ -84,8 +84,9 @@ library(hexbin)
 library(tidyverse)
 
 # set default document options
-knitr::opts_chunk$set(fig.width = 8,
+knitr::opts_chunk$set(fig.width = 7,
                       fig.asp = 0.618,
+                      fig.retina = 2,
                       echo = TRUE,
                       warning = FALSE,
                       message = FALSE,
@@ -588,16 +589,24 @@ system.time({
 
 ```{r}
 metrics %>%
-  ggplot(aes(x = `Endowment/Expenses`, y = `Market Price`)) +
-    geom_hex(bins = 40)
+  ggplot(aes(x = `Endowment/Expenses`, y = `Market Price`, color = Control)) +
+    geom_point(alpha = 1/5) + # geom_hex(bins = 40) +
+    facet_wrap(facets = vars(Control), nrow = 2, ncol = 1) +
+    labs(title = 'Endowment-to-Expenses vs. Market Price',
+         x = 'Endowment/Expenses',
+         y = 'Market Price')
 ```
 
 ## State Appropriations vs Market Price
 
 ```{r}
 metrics %>%
-  ggplot(aes(x = `State Appropriations`, y = `Market Price`)) +
-    geom_hex(bins = 40)
+  ggplot(aes(x = `State Appropriations`, y = `Market Price`, color = Control)) +
+    geom_point(alpha = 1/5) + # geom_hex(bins = 40) +
+    facet_wrap(facets = vars(Control), nrow = 2, ncol = 1) +
+    labs(title = 'State Appropriations vs. Market Price',
+         x = 'State Appropriations',
+         y = 'Market Price')
 ```
 
 # References
