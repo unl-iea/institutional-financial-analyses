@@ -25,7 +25,7 @@ The authors limited their investigations to institutions that:
 * are in the 50 states (and DC)
 * are eligible to participate in Title IV financial aid
 
-Additionally, this script limits the population to four-year institutions.  (Two year institutions will be examined separately).
+Additionally, this script limits the population to four-year institutions.  (Two year institutions may be examined separately).
 
 Because an institution's IPEDS Finance is often reported as part of a parent institution's record, the parent unitid was needed from the FLAGS file to roll up the non-financial metrics to match the financials.
 
@@ -56,8 +56,8 @@ EFA    | line     | Level of student (original line number on survey form) |
 EFA    | eftotlt  | Grand total | _(2008 and after)_
 EFA    | efrace15 | Total men | _(prior to 2008)_
 EFA    | efrace16 | Total women | _(prior to 2008)_
-EFc    | line     | State of residence  (original line number on survey form) | _line not in (58, 99)_
-EFc    | efres01  | First-time degree/certificate-seeking undergraduate students | _institutional mean imputed for missing odd years_
+EFC    | line     | State of residence  (original line number on survey form) | _line not in (58, 99)_
+EFC    | efres01  | First-time degree/certificate-seeking undergraduate students | _institutional mean imputed for missing odd years_
 EFD    | ret_pcf  | Percent of first-time full-time degree/certificate-seeking undergraduate students in fall 2002 returning in fall 2003 | 
 F1A    | f1b11    | State appropriations | 
 F1A    | f1h02    | Value of endowment assets at the end of the fiscal year | 
@@ -80,6 +80,7 @@ library(dbplyr)
 library(RSQLite)
 library(lubridate)
 library(broom)
+library(hexbin)
 library(tidyverse)
 
 # set default document options
@@ -364,7 +365,8 @@ system.time({
            `State Appropriations` = ifelse(is.na(`State Appropriations`),
                                      median(`State Appropriations`,
                                             na.rm = TRUE),
-                                     `State Appropriations`))
+                                     `State Appropriations`)) %>%
+    ungroup()
 })
 ```
 
@@ -513,7 +515,7 @@ system.time({
              FIPS,
              Control,
              `Accounting Standard`,
-             Closed,
+             # Closed,
              `Close Year`,
              Longitude,
              Latitude)
@@ -522,7 +524,7 @@ system.time({
     metrics %>%
     select(Unitid,
            Control,
-           Index, 
+           Index,
            `UG First-time First Year Enrollment`,
            Retention,
            `State Appropriations`,
@@ -537,7 +539,7 @@ system.time({
     mutate(Change = ifelse(Index == 8, (Value - lag(Value, 7)) / lag(Value, 7), (Value - lag(Value, 8)) / lag(Value, 8))) %>%
     ungroup() %>%
     drop_na()
-  
+
   stress_scores <-
     stress_scores %>%
     count(Unitid, Control, Metric) %>%
@@ -547,7 +549,7 @@ system.time({
     mutate(Alert = ifelse(Change <= Crit1, 1, 0),
            Warning = ifelse(Change <= Crit2 & Index == 8, 1, 0)) %>%
     select(-n, -Value, -Crit1, -Crit2)
-  
+
   stress_scores <-
     stress_scores %>%
     pivot_longer(cols = 6:7,
@@ -611,6 +613,7 @@ citation('base')
 citation('broom')
 citation('DBI')
 citation('dbplyr')
+citation('hexbin')
 citation('knitr')
 citation('lubridate')
 citation('odbc')
@@ -631,6 +634,8 @@ dbplyr `r packageVersion('dbplyr')`.
 dplyr `r packageVersion('dplyr')`.
 
 ggplot `r packageVersion('ggplot2')`.
+
+hexbin `r packageVersion('hexbin')`.
 
 lubridate `r packageVersion('lubridate')`.
 
