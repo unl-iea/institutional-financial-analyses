@@ -134,6 +134,7 @@ system.time({
     tbl(db, 'directory') %>%
     filter(level_institution == 1,
            bea_region < 9,
+           bea_region > 0,
            title4_eligible == 1,
            degree_granting == 1)
     
@@ -387,11 +388,11 @@ system.time({
     add_count(Unitid) %>%
     filter(n == 8) %>%
     mutate(`Total Enrollment` = `In State Enrollment` + `Out of State Enrollment`,
-           `In State Enrollment` = `In State Enrollment` / `Total Enrollment`,
-           `Out of State Enrollment` = `Out of State Enrollment` / `Total Enrollment`,
+           `In State Enrollment Pct` = `In State Enrollment` / `Total Enrollment`,
+           `Out of State Enrollment Pct` = `Out of State Enrollment` / `Total Enrollment`,
            `Endowment/Expenses` = `Endowment EOY` / (`Total Expenses` - `Hospital Expenses`),
            `Average Grant Aid` = `Inst Grant Aid` / `UG First-time First Year Enrollment`,
-           `Market Price` = (`In State Tuition` * `In State Enrollment` + `Out of State Tuition` * `Out of State Enrollment`) - `Average Grant Aid`) %>%
+           `Market Price` = (`In State Tuition` * `In State Enrollment Pct` + `Out of State Tuition` * `Out of State Enrollment Pct`) - `Average Grant Aid`) %>%
     select(-c(n, `Total Enrollment`))
 })
 ```
@@ -485,8 +486,7 @@ These were compared to benchmarks established by the authors to set statuses of 
 
 _Notes_
 
-* The assumption that increases in _Retention_ of 56% - 68% are possible is implausible.  This was either due to a misprint, or a basic misuse of the statistic.  Highly selective institutions with return rates in the 90% range are getting Alerts and Warnings on this statistic because their increases fall below 65.6% and 56.4%, respectively.  A more commonsense approach might be to alert those with declining retention rates, and warn those with declines of larger than some criterion such as, say, 5% or 10%.
-* It is unclear whether the relationship between _Undergraduate First-time First-year Enrollment_ and _Market Price_ is fully accounted for in the authors' model.  Does a decrease in realized tuition reflect poor financial health if enrollments are increasing?  Similarly, increased tuition my not reflect strenth if enrollments are falling.
+* It is unclear whether the relationship between _Undergraduate First-time First-year Enrollment_ and _Market Price_ is fully accounted for in the authors' model.  Does a decrease in realized tuition reflect poor financial health if enrollments are increasing?  Similarly, increased tuition may not reflect strenth if enrollments are falling.
 * Many institutions that have publicly acknowledged financial struggles do not seem to have correspondingly high stress scores.
 * Missing values are hard to account for in the calculation of metrics and stress scores.  Non-random patterns of missing data might undermine this model for measuring risk.
 
@@ -495,14 +495,12 @@ system.time({
   criteria <-
     tribble(~Metric, ~Control, ~Crit1, ~Crit2,
             'UG First-time First Year Enrollment', 'Public', -0.154, -0.256,
-            'Retention', 'Public', -0.01, -0.1,
-            # 'Retention', 'Public', 0.68, 0.62,
+            'Retention', 'Public', 0.68, 0.62,
             'Endowment/Expenses', 'Public', 0, -0.103,
             'State Appropriations', 'Public', -0.27, -0.37,
             'Market Price', 'Public', 0, -0.083,
             'UG First-time First Year Enrollment', 'Private', 0.174, 0.308,
-            'Retention', 'Private', -0.01, -0.1,
-            # 'Retention', 'Private', 0.656, 0.564,
+            'Retention', 'Private', 0.656, 0.564,
             'Endowment/Expenses', 'Private', 0, -0.103,
             'State Appropriations', 'Private', -0.27, -0.37,
             'Market Price', 'Private', -0.104,  -0.175)
@@ -516,12 +514,17 @@ system.time({
              FIPS,
              Control,
              `Accounting Standard`,
-             # Closed,
              `Close Year`,
              Longitude,
              Latitude)
-  
-  stress_scores <-
+})
+```
+
+### Compute Change Scores
+
+```{r}
+system.time({
+  change_scores <-
     metrics %>%
     select(Unitid,
            Control,
@@ -537,22 +540,40 @@ system.time({
                  values_to = 'Value') %>%
     arrange(Unitid, Control, Metric, Index) %>%
     group_by(Unitid, Control, Metric) %>%
-    mutate(Change = ifelse(Index == 8, (Value - lag(Value, 7)) / lag(Value, 7), (Value - lag(Value, 8)) / lag(Value, 8))) %>%
+    mutate(Change = ifelse(Index == 8, (Value - lag(Value, 7)) / lag(Value, 7), (Value - lag(Value, 8)) / lag(Value, 8))
+           ) %>%
     ungroup() %>%
-    drop_na()
+    drop_na() %>%
+    mutate(Change = ifelse(Metric == 'Retention', Value, Change)) # Retention uses actual value, not change score
+})
+```
 
-  stress_scores <-
-    stress_scores %>%
+### Add Alert and Warning Scores
+
+```{r}
+system.time({
+  warning_scores <-
+    change_scores %>%
     count(Unitid, Control, Metric) %>%
-    inner_join(stress_scores) %>%
+    inner_join(change_scores) %>%
     filter(n == 2) %>%
     inner_join(criteria) %>%
     mutate(Alert = ifelse(Change <= Crit1, 1, 0),
-           Warning = ifelse(Change <= Crit2 & Index == 8, 1, 0)) %>%
+           Alert = ifelse(Metric == 'Retention' & Value <= Crit1, 1, Alert),
+           Warning = ifelse(Change <= Crit2 & Index == 8, 1, 0),
+           Warning = ifelse(Metric == 'Retention' & Index == 8 & Value <= Crit2, 1, Warning)) %>%
     select(-n, -Value, -Crit1, -Crit2)
+})
 
+warning_scores
+```
+
+### Reshape Final Stress Scores
+
+```{r}
+system.time({
   stress_scores <-
-    stress_scores %>%
+    warning_scores %>%
     pivot_longer(cols = 6:7,
                  names_to = 'Status',
                  values_to = 'Value') %>%
@@ -562,7 +583,7 @@ system.time({
     summarize(`Stress Score` = sum(Value)) %>%
     ungroup() %>%
     mutate(`Stress Score Pct` = `Stress Score` / 12) %>%
-    inner_join(stress_scores, ., by = 'Unitid') %>%
+    inner_join(warning_scores, ., by = 'Unitid') %>%
     mutate(Type = recode(Index,
                          `8` = 'Actual',
                          `11` = 'Projected')) %>%
@@ -607,6 +628,11 @@ metrics %>%
     labs(title = 'State Appropriations vs. Market Price',
          x = 'State Appropriations',
          y = 'Market Price')
+```
+
+```{r}
+metrics %>%
+  filter(`Market Price` <= 0)
 ```
 
 # References
