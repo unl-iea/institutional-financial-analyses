@@ -1,0 +1,222 @@
+---
+title: "IPEDS Financial Metrics"
+subtitle: "Visualizations"
+author: "Jason P. Casey"
+date: 2020-06-14
+output: 
+  html_notebook:
+    code_folding: show
+params:
+  unitid:
+    label: "Reference Institution"
+    value: "181464"
+  control:
+    label: "Type of Control"
+    value: "Public"
+---
+                      
+```{r setup}
+# libraries
+library(knitr)
+library(hexbin)
+library(WVPlots)
+library(janitor)
+library(lubridate)
+library(tidyverse)
+library(data.table)
+library(RColorBrewer)
+
+# set default document options
+knitr::opts_chunk$set(fig.width = 6,
+                      fig.asp = 0.618,
+                      fig.retina = 2,
+                      out.width = "70%",
+                      echo = TRUE,
+                      warning = FALSE,
+                      message = FALSE,
+                      collapse = TRUE)
+
+# set random seed
+set.seed(1965)
+
+# norming function
+norm_it <- function(x) {
+  x / first(x) * 100
+}
+```
+
+# Read Data
+
+```{r}
+system.time({
+  metrics <- 
+    fread('data/metrics.csv')[order(Unitid, year_key)][,
+                              # create values normed to first year
+                              `:=`(`NMarket Price` = norm_it(`Market Price`),
+                                   `NUG First-time First Year Enrollment` = norm_it(`UG First-time First Year Enrollment`),
+                                   `NRetention` = norm_it(`Retention`),
+                                   `NState Appropriations` = norm_it(`State Appropriations`),
+                                   `NEndowment/Expenses` = norm_it(`Endowment/Expenses`)),  
+                              keyby = .(Unitid)]
+  
+  stress <-
+    fread('data/stress.csv')
+})
+```
+
+# Reference Institution Metric Values
+
+```{r}
+metrics[Unitid == params$unitid]
+```
+
+# Reference Institution Stess Score
+
+```{r}
+stress[Unitid == params$unitid]
+```
+
+# Plots of Reference Institution Versus Sector
+
+## Color Palette
+
+Use the following to select the color palette if you have difficulty with the defaults
+
+```{r}
+display.brewer.all(n=NULL, type="qual", select=NULL, exact.n=TRUE, 
+colorblindFriendly=TRUE)
+brewer.pal.info
+```
+
+## First Year Enrollment
+
+```{r}
+inst <- stress[Unitid == params$unitid, `Institution Name`, drop = TRUE]
+
+ggplot(data = metrics[Control == params$control],
+       aes(x = `Fiscal Year`, y = `UG First-time First Year Enrollment`)) +
+  # box plot for reference group
+  geom_boxplot(color = '#1f78b4', fill='#a6cee3', alpha = 1/5) +
+  # line plot for reference institution
+  geom_line(data = metrics[Unitid == params$unitid],
+            aes(x = `Fiscal Year`, y = `UG First-time First Year Enrollment`, group = 1),
+            color = 'black') +
+  # points for reference institution
+  geom_point(data = metrics[Unitid == params$unitid],
+            aes(x = `Fiscal Year`, y = `UG First-time First Year Enrollment`),
+            color = 'black',
+            shape = 18,
+            size = 6) +
+  # set y-axis to comma format
+  scale_y_continuous(labels = scales::label_comma()) +
+  labs(title = 'First-year Enrollment',
+       subtitle = str_c(inst, 'vs.', params$control, 'Institutions', sep = ' '))
+```
+
+## Retention
+
+```{r}
+ggplot(data = metrics[Control == params$control],
+       aes(x = `Fiscal Year`, y = Retention)) +
+  # box plot for reference group
+  geom_boxplot(color = '#1f78b4', fill='#a6cee3', alpha = 1/5) +
+  # line plot for reference institution
+  geom_line(data = metrics[Unitid == params$unitid],
+            aes(x = `Fiscal Year`, y = Retention, group = 1),
+            color = 'black') +
+  # points for reference institution
+  geom_point(data = metrics[Unitid == params$unitid],
+            aes(x = `Fiscal Year`, y = Retention),
+            color = 'black',
+            shape = 18,
+            size = 6) +
+  # set y-axis to percentage format
+  scale_y_continuous(labels = scales::label_percent()) +
+  labs(title = 'Retention',
+       subtitle = str_c(inst, 'vs.', params$control, 'Institutions', sep = ' '))
+```
+
+## Market Price
+
+```{r}
+ggplot(data = metrics[Control == params$control],
+       aes(x = `Fiscal Year`, y = `Market Price`)) +
+  # box plot for reference group
+  geom_boxplot(color = '#1f78b4', fill='#a6cee3', alpha = 1/5) +
+  # line plot for reference institution
+  geom_line(data = metrics[Unitid == params$unitid],
+            aes(x = `Fiscal Year`, y = `Market Price`, group = 1),
+            color = 'black') +
+  # points for reference institution
+  geom_point(data = metrics[Unitid == params$unitid],
+            aes(x = `Fiscal Year`, y = `Market Price`),
+            color = 'black',
+            shape = 18,
+            size = 6) +
+  # set y-axis to dollar format
+  scale_y_continuous(labels = scales::label_dollar()) +
+  labs(title = 'Market Price',
+       subtitle = str_c(inst, 'vs.', params$control, 'Institutions', sep = ' '),
+       caption = 'Dollars adjusted for inflation using GDP.')
+```
+
+## Endowment/Expenses (Privates) or State Appropriations (Publics)
+
+```{r}
+if (params$control == 'Public') {
+  ggplot(data = metrics[Control == params$control],
+         aes(x = `Fiscal Year`, y = `State Appropriations`)) +
+    # box plot for reference group
+    geom_boxplot(color = '#1f78b4', fill='#a6cee3', alpha = 1/5) +
+    # line plot for reference institution
+    geom_line(data = metrics[Unitid == params$unitid],
+              aes(x = `Fiscal Year`, y = `State Appropriations`, group = 1),
+              color = 'black') +
+    # points for reference institution
+    geom_point(data = metrics[Unitid == params$unitid],
+              aes(x = `Fiscal Year`, y = `State Appropriations`),
+              color = 'black',
+              shape = 18,
+              size = 6) +
+    # set y-axis to dollar format
+    scale_y_continuous(labels = scales::label_dollar()) +
+  labs(title = 'State Appropriations',
+       subtitle = str_c(inst, 'vs.', params$control, 'Institutions', sep = ' '))
+} else {
+  ggplot(data = metrics[Control == params$control],
+         aes(x = `Fiscal Year`, y = `Endowment/Expenses`)) +
+    # box plot for reference group
+    geom_boxplot(color = '#1f78b4', fill='#a6cee3', alpha = 1/5) +
+    # line plot for reference institution
+    geom_line(data = metrics[Unitid == params$unitid],
+              aes(x = `Fiscal Year`, y = `Endowment/Expenses`, group = 1),
+              color = 'black') +
+    # points for reference institution
+    geom_point(data = metrics[Unitid == params$unitid],
+              aes(x = `Fiscal Year`, y = `Endowment/Expenses`),
+              color = 'black',
+              shape = 18,
+              size = 6) +
+    # set y-axis to dollar format
+    scale_y_continuous(labels = scales::label_dollar()) +
+  labs(title = 'Endowment to Total Expenses less Hospital Expenses',
+       subtitle = str_c(inst, 'vs.', params$control, 'Institutions', sep = ' '))
+}
+```
+
+# Plots of Normed Metrics
+
+```{r out.width = "70%"}
+ggplot(data = metrics[Unitid == params$unitid],
+       aes(x = `Fiscal Year`, group = 1)) +
+  geom_line(aes(y = `NMarket Price`, color = 'Market Price'), size = 1) +
+  geom_line(aes(y = `NUG First-time First Year Enrollment`, color = 'FY Enrollment'), size = 1) +
+  geom_line(aes(y = `NRetention`, color = 'Retention'), size = 1) +
+  geom_line(aes(y = `NState Appropriations`, color = 'Appropriations'), size = 1) +
+  labs(title = str_c('Metrics for', inst, sep = ' '),
+       subtitle = 'Scaled to First Year = 100',
+       color = 'Metric') +
+  scale_colour_brewer(palette = 'Set2')
+```
+
+
