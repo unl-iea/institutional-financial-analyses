@@ -171,7 +171,8 @@ system.time({
   retention <-
     tbl(db, 'retention') %>%
     filter(year_key > year_param - 8,
-           year_key <= year_param) %>%
+           year_key <= year_param,
+           retention_ft > 0) %>%
     select(unitid,
            year_key,
            Retention = retention_ft) %>%
@@ -407,13 +408,21 @@ system.time({
 })
 ```
 
+## Inspect Institutions With Unusual Market Price
+
+```{r}
+metrics %>%
+  filter(`Market Price` <= 0)
+```
+
 ## Estimate Institutional Extrapolation Models
 
 The authors create a linear function for each institution and use this to project three years past the most recent year.
 
 ```{r}
-metrics <-
-  read_csv('data/metrics.csv')
+# metrics <-
+#   read_csv('data/metrics.csv')
+# 
 system.time({
   coef_helper <- function(td) as_tibble(t(deframe(td)))
   models <-
@@ -628,11 +637,6 @@ metrics %>%
     labs(title = 'State Appropriations vs. Market Price',
          x = 'State Appropriations',
          y = 'Market Price')
-```
-
-```{r}
-metrics %>%
-  filter(`Market Price` <= 0)
 ```
 
 # References
