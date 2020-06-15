@@ -9,7 +9,7 @@ output:
 params:
   unitid:
     label: "Reference Institution"
-    value: "181376"
+    value: "152080"
 ---
                       
 ```{r setup}
@@ -116,7 +116,7 @@ ggplot(data = metrics[Control == sector],
   # set y-axis to comma format
   scale_y_continuous(labels = scales::label_comma()) +
   labs(title = 'First-year Enrollment',
-       subtitle = str_c(inst, 'vs.', params$control, 'Institutions', sep = ' '))
+       subtitle = str_c(inst, 'vs. Four Year', sector, 'Institutions', sep = ' '))
 ```
 
 ## Retention
@@ -139,7 +139,7 @@ ggplot(data = metrics[Control == sector],
   # set y-axis to percentage format
   scale_y_continuous(labels = scales::label_percent()) +
   labs(title = 'Retention',
-       subtitle = str_c(inst, 'vs.', params$control, 'Institutions', sep = ' '))
+       subtitle = str_c(inst, 'vs. Four Year', sector, 'Institutions', sep = ' '))
 ```
 
 ## Market Price
@@ -162,7 +162,7 @@ ggplot(data = metrics[Control == sector],
   # set y-axis to dollar format
   scale_y_continuous(labels = scales::label_dollar()) +
   labs(title = 'Market Price',
-       subtitle = str_c(inst, 'vs.', params$control, 'Institutions', sep = ' '),
+       subtitle = str_c(inst, 'vs. Four Year', sector, 'Institutions', sep = ' '),
        caption = 'Dollars adjusted for inflation using GDP.')
 ```
 
@@ -187,7 +187,7 @@ if (sector == 'Public') {
     # set y-axis to dollar format
     scale_y_continuous(labels = scales::label_dollar()) +
   labs(title = 'State Appropriations',
-       subtitle = str_c(inst, 'vs.', params$control, 'Institutions', sep = ' '))
+       subtitle = str_c(inst, 'vs. Four Year', sector, 'Institutions', sep = ' '))
 } else {
   ggplot(data = metrics[Control == sector],
          aes(x = `Fiscal Year`, y = `Endowment/Expenses`)) +
@@ -206,7 +206,7 @@ if (sector == 'Public') {
     # set y-axis to dollar format
     scale_y_continuous(labels = scales::label_dollar()) +
   labs(title = 'Endowment to Total Expenses less Hospital Expenses',
-       subtitle = str_c(inst, 'vs.', params$control, 'Institutions', sep = ' '))
+       subtitle = str_c(inst, 'vs. Four Year', sector, 'Institutions', sep = ' '))
 }
 ```
 
@@ -215,10 +215,18 @@ if (sector == 'Public') {
 ```{r out.width = "70%"}
 ggplot(data = metrics[Unitid == params$unitid],
        aes(x = `Fiscal Year`, group = 1)) +
-  geom_line(aes(y = `NMarket Price`, color = 'Market Price'), size = 1) +
-  geom_line(aes(y = `NUG First-time First Year Enrollment`, color = 'FY Enrollment'), size = 1) +
-  geom_line(aes(y = `NRetention`, color = 'Retention'), size = 1) +
-  geom_line(aes(y = `NState Appropriations`, color = 'Appropriations'), size = 1) +
+  geom_line(aes(y = `NMarket Price`,
+                color = 'Market Price'),
+            size = 1) +
+  geom_line(aes(y = `NUG First-time First Year Enrollment`,
+                color = 'FY Enrollment'),
+            size = 1) +
+  geom_line(aes(y = `NRetention`,
+                color = 'Retention'),
+            size = 1) +
+  geom_line(aes(y = `NState Appropriations`,
+                color = 'Appropriations'),
+            size = 1) +
   labs(title = str_c('Scaled Metrics for', inst, sep = ' '),
        subtitle = str_c(min(metrics$`Fiscal Year`), max(metrics$`Fiscal Year`), sep = ' through '),
        caption = 'Scaled to First Year = 100',
@@ -229,7 +237,7 @@ ggplot(data = metrics[Unitid == params$unitid],
 # Plots of Institutional Metrics
 
 ## First Year Enrollment
-
+  
 ```{r}
 inst_val <- metrics[Unitid == params$unitid][order(year_key)][, .(ref = first(`UG First-time First Year Enrollment`))]
 alert_line <- criteria[Control == sector & Metric == 'UG First-time First Year Enrollment', .(Alert = (1 + Alert) * inst_val$ref)]
@@ -241,19 +249,29 @@ df <- data.table(year_key = seq(max(metrics$year_key) + 1,
                                                                  Unitid = as.integer(params$unitid))] %>%
   bind_rows(., metrics[Unitid == params$unitid])
 
+label <- data.table(
+    `UG First-time First Year Enrollment` = c(alert_line$Alert, warn_line$Warning),
+    `Fiscal Year` = '2010-2011',
+    label = c("Alert", "Warning")
+  )
+
 fit <- lm(`UG First-time First Year Enrollment` ~ year_key, data = df)
 df$pred <- predict(fit, df)
   
 ggplot(data = df,
        aes(x = `Fiscal Year`, y = `UG First-time First Year Enrollment`, group = 1)) +
   geom_line(size = 1) +
+  # add linear trend line
   geom_line(aes(y = pred),
             linetype = 'longdash',
             color = '#7570b3') +
+  # add alert and warning lines
   geom_hline(data = alert_line,
              aes(yintercept = Alert), linetype = 'dashed', color = '#1b9e77') +
   geom_hline(data = warn_line,
              aes(yintercept = Warning), linetype = 'dashed', color = '#d95f02') +
+  # Add line labels
+  geom_text(aes(label = label), data = label, hjust = "left") +
   # set y-axis to comma format
   scale_y_continuous(labels = scales::label_comma()) +
   labs(title = 'First-year Enrollment',
@@ -275,16 +293,26 @@ df <- data.table(year_key = seq(max(metrics$year_key) + 1,
 fit <- lm(Retention ~ year_key, data = df)
 df$pred <- predict(fit, df)
   
+label <- data.table(
+    Retention = c(alert_line$Alert, warn_line$Warning),
+    `Fiscal Year` = '2010-2011',
+    label = c("Alert", "Warning")
+  )
+
 ggplot(data = df,
        aes(x = `Fiscal Year`, y = Retention, group = 1)) +
   geom_line(size = 1) +
+  # add linear trend line
   geom_line(aes(y = pred),
             linetype = 'longdash',
             color = '#7570b3') +
+  # add alert and warning lines
   geom_hline(data = alert_line,
              aes(yintercept = Alert), linetype = 'dashed', color = '#1b9e77') +
   geom_hline(data = warn_line,
              aes(yintercept = Warning), linetype = 'dashed', color = '#d95f02') +
+  # Add line labels
+  geom_text(aes(label = label), data = label, hjust = "left") +
   # set y-axis to percent format
   scale_y_continuous(labels = scales::label_percent()) +
   labs(title = 'Retention',
@@ -307,16 +335,26 @@ df <- data.table(year_key = seq(max(metrics$year_key) + 1,
 fit <- lm(`Market Price` ~ year_key, data = df)
 df$pred <- predict(fit, df)
   
+label <- data.table(
+    `Market Price` = c(alert_line$Alert, warn_line$Warning),
+    `Fiscal Year` = '2010-2011',
+    label = c("Alert", "Warning")
+  )
+
 ggplot(data = df,
        aes(x = `Fiscal Year`, y = `Market Price`, group = 1)) +
   geom_line(size = 1) +
+  # add linear trend line
   geom_line(aes(y = pred),
             linetype = 'longdash',
             color = '#7570b3') +
+  # add alert and warning lines
   geom_hline(data = alert_line,
              aes(yintercept = Alert), linetype = 'dashed', color = '#1b9e77') +
   geom_hline(data = warn_line,
              aes(yintercept = Warning), linetype = 'dashed', color = '#d95f02') +
+  # Add line labels
+  geom_text(aes(label = label), data = label, hjust = "left") +
   # set y-axis to dollar format
   scale_y_continuous(labels = scales::label_dollar()) +
   labs(title = 'Market Price',
@@ -340,19 +378,30 @@ if (sector == 'Public') {
   fit <- lm(`State Appropriations` ~ year_key, data = df)
   df$pred <- predict(fit, df)
     
+  label <- data.table(
+      `State Appropriations` = c(alert_line$Alert, warn_line$Warning),
+      `Fiscal Year` = '2010-2011',
+      label = c("Alert", "Warning")
+    )
+
   ggplot(data = df,
          aes(x = `Fiscal Year`, y = `State Appropriations`, group = 1)) +
     geom_line(size = 1) +
+    # add linear trend line
     geom_line(aes(y = pred),
               linetype = 'longdash',
               color = '#7570b3') +
+    # add alert and warning lines
     geom_hline(data = alert_line,
                aes(yintercept = Alert), linetype = 'dashed', color = '#1b9e77') +
     geom_hline(data = warn_line,
                aes(yintercept = Warning), linetype = 'dashed', color = '#d95f02') +
+    # Add line labels
+    geom_text(aes(label = label), data = label, hjust = "left") +
     # set y-axis to dollar format
-    scale_y_continuous(labels = scales::label_dollar()) +
-    labs(title = 'State Apprpriations',
+    scale_y_continuous(labels = scales::label_dollar(scale = .000001,
+                                                     suffix = 'M')) +
+    labs(title = 'State Appropriations',
          subtitle = inst)
 } else {
   inst_val <- metrics[Unitid == params$unitid][order(year_key)][, .(ref = first(`Endowment/Expenses`))]
@@ -368,22 +417,34 @@ if (sector == 'Public') {
   fit <- lm(`Endowment/Expenses` ~ year_key, data = df)
   df$pred <- predict(fit, df)
     
+  label <- data.table(
+      `Endowment/Expenses` = c(alert_line$Alert, warn_line$Warning),
+      `Fiscal Year` = '2010-2011',
+      label = c("Alert", "Warning")
+    )
+
   ggplot(data = df,
          aes(x = `Fiscal Year`, y = `Endowment/Expenses`, group = 1)) +
     geom_line(size = 1) +
+    # add linear trend line
     geom_line(aes(y = pred),
               linetype = 'longdash',
               color = '#7570b3') +
+    # add alert and warning lines
     geom_hline(data = alert_line,
                aes(yintercept = Alert), linetype = 'dashed', color = '#1b9e77') +
-    # geom_label(data = alert_line, aes(mapping = 'Alert', y = Alert)) +
     geom_hline(data = warn_line,
                aes(yintercept = Warning), linetype = 'dashed', color = '#d95f02') +
+    # Add line labels
+    geom_text(aes(label = label), data = label, hjust = "left") +
     # set y-axis to comma format
     scale_y_continuous(labels = scales::label_comma(scale = 2)) +
     labs(title = 'Endowment/Expenses',
          subtitle = inst)
 }
+```
+```{r}
+metrics[Unitid == params$unitid][order(year_key)] # [, .(ref = first(`Endowment/Expenses`))]
 ```
 
 # Other Useful Stuff
