@@ -21,8 +21,11 @@ library(broom)
 library(tidyverse)
 
 # set default document options
-knitr::opts_chunk$set(fig.width = 8,
+knitr::opts_chunk$set(fig.width = 6,
                       fig.asp = 0.618,
+                      fig.retina = 2,
+                      out.width = "70%",
+                      fig.align = "center",
                       echo = TRUE,
                       warning = FALSE,
                       message = FALSE,
@@ -340,7 +343,7 @@ metrics %>%
     geom_col(alpha = 0.8) +
     scale_x_continuous(labels = scales::label_percent(),
                        limits = c(0,1)) +
-    scale_fill_manual(values = c('darkgray', 'red')) +
+    scale_fill_manual(values = c('darkgray', '#fc8d59')) +
     labs(title = 'Tuition Dependence at Selected Institutions',
          subtitle = 'FY2017-18',
          y = NULL)
@@ -360,13 +363,13 @@ metrics %>%
   ggplot(aes(x = `Tuition dependence`,
              y = `Institutional Grants (Unfunded)`,
              color = `Margin Category`)) +
-    geom_point(alpha = 1/5) +
+    geom_point(alpha = 0.5) +
     scale_x_continuous(labels = scales::label_percent(),
                        limits = c(0, 1)) +
     scale_y_continuous(breaks = scales::breaks_extended(8),
                        labels = scales::label_dollar(scale = .001,
                                                      suffix = 'K')) +
-    scale_color_manual(values = c('black', 'blue', 'red')) +
+    scale_color_manual(values = c('#636363', '#91bfdb', '#fc8d59')) +
     labs(title = 'Average Unfunded Grant vs. Tuition Dependence',
          subtitle = 'Public and Private U.S. Institutions, FY2017-18')
 ```
@@ -403,7 +406,7 @@ metrics %>%
              y = `Institution Name`)) +
     geom_tile(aes(fill = rescale),
               color = 'white') +
-    scale_fill_gradient(low = 'red',
+    scale_fill_gradient(low = '#ef8a62',
                         high = 'white') +
     scale_x_discrete(expand = c(0, 0)) +
     scale_y_discrete(expand = c(0, 0)) +
