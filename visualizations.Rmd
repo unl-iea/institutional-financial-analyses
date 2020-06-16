@@ -9,7 +9,7 @@ output:
 params:
   unitid:
     label: "Reference Institution"
-    value: "152080"
+    value: 181464
 ---
                       
 ```{r setup}
@@ -36,46 +36,69 @@ knitr::opts_chunk$set(fig.width = 6,
 
 # set random seed
 set.seed(1965)
-
-# norming function
-norm_it <- function(x) {
-  x / first(x) * 100
-}
-
-# cutoffs
-criteria <- data.table(
-  Metric = c('UG First-time First Year Enrollment',
-             'Retention',
-             'Endowment/Expenses',
-             'State Appropriations',
-             'Market Price',
-             'UG First-time First Year Enrollment',
-             'Retention',
-             'Endowment/Expenses',
-             'State Appropriations',
-             'Market Price'),
-  Control = c(rep('Public', 5), rep('Private', 5)),
-  Alert = c(-0.154, 0.68, 0, -0.27, 0, -0.174, 0.656, 0, -0.27, -0.104),
-  Warning = c(-0.256, 0.62, -0.103, -0.37, -0.083, -0.308, 0.564, -0.103, -0.37, -0.175)
-)
 ```
 
 # Read Data
 
 ```{r}
 system.time({
-  metrics <- 
-    fread('data/metrics.csv')[order(Unitid, year_key)][,
-                              # create values normed to first year
-                              `:=`(`NMarket Price` = norm_it(`Market Price`),
-                                   `NUG First-time First Year Enrollment` = norm_it(`UG First-time First Year Enrollment`),
-                                   `NRetention` = norm_it(`Retention`),
-                                   `NState Appropriations` = norm_it(`State Appropriations`),
-                                   `NEndowment/Expenses` = norm_it(`Endowment/Expenses`)),  
-                              keyby = .(Unitid)]
-  
+  # read stress scores file
   stress <-
     fread('data/stress.csv')
+  
+  # cutoffs
+  criteria <- data.table(
+    Metric = c('UG First-time First Year Enrollment',
+               'Retention',
+               'State Appropriations',
+               'Market Price',
+               'UG First-time First Year Enrollment',
+               'Retention',
+               'Endowment/Expenses',
+               'Market Price'),
+    Control = c(rep('Public', 5), rep('Private', 5)),
+    Alert = c(-0.154, 0.68, -0.27, 0, -0.174, 0.656, 0, -0.104),
+    Warning = c(-0.256, 0.62, -0.37, -0.083, -0.308, 0.564, -0.103, -0.175)
+  )
+  
+  metrics <-
+    melt.data.table(
+      fread('data/metrics.csv')[order(Unitid, year_key)][,
+                                                         .(Unitid,
+                                                          `Institution Name`,
+                                                          State,
+                                                          Control,
+                                                          year_key,
+                                                          `Fiscal Year`,
+                                                          `UG First-time First Year Enrollment`,
+                                                          Retention,
+                                                          `Market Price`,
+                                                          `Endowment/Expenses`,
+                                                          `State Appropriations`)],
+      measure.vars = 7:11,
+      variable.name = 'Metric',
+      value.name = 'Value'
+    ) %>%
+    # join criteria
+    inner_join(criteria, by = c('Control', 'Metric')) %>%
+    # add normed values and convert alerts and warnings to proper scale
+    .[,
+      `:=`(`Normed Value` = Value / first(Value) * 100,
+           Alert = ifelse(Metric == 'Retention', Alert, first(Value) * (1 + Alert)),
+           Warning = ifelse(Metric == 'Retention', Warning, first(Value) * (1 + Warning))),
+      keyby = .(Unitid, Metric)]
+
+    # get reference institution and sector
+  inst <- stress[Unitid == params$unitid, `Institution Name`, drop = TRUE]
+  sector <- stress[Unitid == params$unitid, Control, drop = TRUE]
+  
+  # metric names for sector of institution
+  metric_names <- ifelse(sector == 'Public', 'State Appropriations', 'Endowment/Expenses') %>%
+    c(., c('UG First-time First Year Enrollment', 'Retention', 'Market Price'))
+
+
+  # housekeeping
+  rm(criteria)
 })
 ```
 
@@ -96,140 +119,87 @@ stress[Unitid == params$unitid]
 ## First Year Enrollment
 
 ```{r}
-inst <- stress[Unitid == params$unitid, `Institution Name`, drop = TRUE]
-sector <- stress[Unitid == params$unitid, Control, drop = TRUE]
+# function to create standard-formatted box plots with reference institution
+box_me <- function(metric)
+{
+  df <- metrics[Control == sector & Metric == metric]
+  
+  ggplot(data = df,
+         aes(x = `Fiscal Year`, y = Value)) +
+    # box plot for reference group
+    geom_boxplot(color = '#1f78b4', fill='#a6cee3', alpha = 1/5) +
+    # line plot for reference institution
+    geom_line(data = df[Unitid == params$unitid],
+              aes(x = `Fiscal Year`, y = Value, group = 1),
+              color = 'black',
+              size = 1.5) +
+    # points for reference institution
+    geom_point(data = df[Unitid == params$unitid],
+               aes(x = `Fiscal Year`, y = Value),
+               color = 'black',
+               shape = 18,
+               size = 6) +
+    labs(title = metric,
+         y = metric,
+         subtitle = str_c(inst, 'vs. Four Year', sector, 'Institutions', sep = ' '))
+}
 
-ggplot(data = metrics[Control == sector],
-       aes(x = `Fiscal Year`, y = `UG First-time First Year Enrollment`)) +
-  # box plot for reference group
-  geom_boxplot(color = '#1f78b4', fill='#a6cee3', alpha = 1/5) +
-  # line plot for reference institution
-  geom_line(data = metrics[Unitid == params$unitid],
-            aes(x = `Fiscal Year`, y = `UG First-time First Year Enrollment`, group = 1),
-            color = 'black') +
-  # points for reference institution
-  geom_point(data = metrics[Unitid == params$unitid],
-            aes(x = `Fiscal Year`, y = `UG First-time First Year Enrollment`),
-            color = 'black',
-            shape = 18,
-            size = 6) +
+
+
+box_me('UG First-time First Year Enrollment') +
   # set y-axis to comma format
-  scale_y_continuous(labels = scales::label_comma()) +
-  labs(title = 'First-year Enrollment',
-       subtitle = str_c(inst, 'vs. Four Year', sector, 'Institutions', sep = ' '))
+  scale_y_continuous(labels = scales::comma_format()) +
+  labs(title = 'First Year Undergraduate Enrollment')
 ```
 
 ## Retention
 
 ```{r}
-ggplot(data = metrics[Control == sector],
-       aes(x = `Fiscal Year`, y = Retention)) +
-  # box plot for reference group
-  geom_boxplot(color = '#1f78b4', fill='#a6cee3', alpha = 1/5) +
-  # line plot for reference institution
-  geom_line(data = metrics[Unitid == params$unitid],
-            aes(x = `Fiscal Year`, y = Retention, group = 1),
-            color = 'black') +
-  # points for reference institution
-  geom_point(data = metrics[Unitid == params$unitid],
-            aes(x = `Fiscal Year`, y = Retention),
-            color = 'black',
-            shape = 18,
-            size = 6) +
+box_me('Retention') +
   # set y-axis to percentage format
-  scale_y_continuous(labels = scales::label_percent()) +
-  labs(title = 'Retention',
-       subtitle = str_c(inst, 'vs. Four Year', sector, 'Institutions', sep = ' '))
+  scale_y_continuous(labels = scales::label_percent())
 ```
 
 ## Market Price
 
 ```{r}
-ggplot(data = metrics[Control == sector],
-       aes(x = `Fiscal Year`, y = `Market Price`)) +
-  # box plot for reference group
-  geom_boxplot(color = '#1f78b4', fill='#a6cee3', alpha = 1/5) +
-  # line plot for reference institution
-  geom_line(data = metrics[Unitid == params$unitid],
-            aes(x = `Fiscal Year`, y = `Market Price`, group = 1),
-            color = 'black') +
-  # points for reference institution
-  geom_point(data = metrics[Unitid == params$unitid],
-            aes(x = `Fiscal Year`, y = `Market Price`),
-            color = 'black',
-            shape = 18,
-            size = 6) +
+box_me('Market Price') +
   # set y-axis to dollar format
   scale_y_continuous(labels = scales::label_dollar()) +
-  labs(title = 'Market Price',
-       subtitle = str_c(inst, 'vs. Four Year', sector, 'Institutions', sep = ' '),
-       caption = 'Dollars adjusted for inflation using GDP.')
+  labs(caption = 'Dollars adjusted for inflation using GDP.')
 ```
 
 ## Endowment/Expenses (Privates) or State Appropriations (Publics)
 
 ```{r}
 if (sector == 'Public') {
-  ggplot(data = metrics[Control == sector],
-         aes(x = `Fiscal Year`, y = `State Appropriations`)) +
-    # box plot for reference group
-    geom_boxplot(color = '#1f78b4', fill='#a6cee3', alpha = 1/5) +
-    # line plot for reference institution
-    geom_line(data = metrics[Unitid == params$unitid],
-              aes(x = `Fiscal Year`, y = `State Appropriations`, group = 1),
-              color = 'black') +
-    # points for reference institution
-    geom_point(data = metrics[Unitid == params$unitid],
-              aes(x = `Fiscal Year`, y = `State Appropriations`),
-              color = 'black',
-              shape = 18,
-              size = 6) +
+  box_me('State Appropriations') +
     # set y-axis to dollar format
-    scale_y_continuous(labels = scales::label_dollar()) +
-  labs(title = 'State Appropriations',
-       subtitle = str_c(inst, 'vs. Four Year', sector, 'Institutions', sep = ' '))
+    scale_y_continuous(labels = scales::label_dollar(scale = .000001,
+                                                     suffix = 'M'))
 } else {
-  ggplot(data = metrics[Control == sector],
-         aes(x = `Fiscal Year`, y = `Endowment/Expenses`)) +
-    # box plot for reference group
-    geom_boxplot(color = '#1f78b4', fill='#a6cee3', alpha = 1/5) +
-    # line plot for reference institution
-    geom_line(data = metrics[Unitid == params$unitid],
-              aes(x = `Fiscal Year`, y = `Endowment/Expenses`, group = 1),
-              color = 'black') +
-    # points for reference institution
-    geom_point(data = metrics[Unitid == params$unitid],
-              aes(x = `Fiscal Year`, y = `Endowment/Expenses`),
-              color = 'black',
-              shape = 18,
-              size = 6) +
+  box_me('Endowment/Expenses') +
     # set y-axis to dollar format
     scale_y_continuous(labels = scales::label_dollar()) +
-  labs(title = 'Endowment to Total Expenses less Hospital Expenses',
-       subtitle = str_c(inst, 'vs. Four Year', sector, 'Institutions', sep = ' '))
+    labs(title = 'Endowment to Total Expenses less Hospital Expenses')
 }
 ```
 
 # Plot of Normed Metrics
 
-```{r out.width = "70%"}
+
+```{r}
 ggplot(data = metrics[Unitid == params$unitid],
-       aes(x = `Fiscal Year`, group = 1)) +
-  geom_line(aes(y = `NMarket Price`,
-                color = 'Market Price'),
-            size = 1) +
-  geom_line(aes(y = `NUG First-time First Year Enrollment`,
-                color = 'FY Enrollment'),
-            size = 1) +
-  geom_line(aes(y = `NRetention`,
-                color = 'Retention'),
-            size = 1) +
-  geom_line(aes(y = `NState Appropriations`,
-                color = 'Appropriations'),
-            size = 1) +
+       mapping = aes(x = `Fiscal Year`,
+                     y = `Normed Value`,
+                     group = Metric,
+                     color = Metric,
+                     linetype = Metric)) +
+  geom_line(size = 1.5) +
   labs(title = str_c('Scaled Metrics for', inst, sep = ' '),
        subtitle = str_c(min(metrics$`Fiscal Year`), max(metrics$`Fiscal Year`), sep = ' through '),
        caption = 'Scaled to First Year = 100',
+       y = 'Normed Value',
        color = 'Metric') +
   scale_colour_brewer(palette = 'Set2')
 ```
@@ -237,221 +207,110 @@ ggplot(data = metrics[Unitid == params$unitid],
 # Plots of Institutional Metrics
 
 ## First Year Enrollment
-  
+
 ```{r}
-inst_val <- metrics[Unitid == params$unitid][order(year_key)][, .(ref = first(`UG First-time First Year Enrollment`))]
-alert_line <- criteria[Control == sector & Metric == 'UG First-time First Year Enrollment', .(Alert = (1 + Alert) * inst_val$ref)]
-warn_line <- criteria[Control == sector & Metric == 'UG First-time First Year Enrollment', .(Warning = (1 + Warning) * inst_val$ref)]
+# statistical model specifications
+run_model <- function(df) {
+  lm(formula = Value ~ year_key, 
+     data = df)
+}
 
-df <- data.table(year_key = seq(max(metrics$year_key) + 1,
-                                max(metrics$year_key) + 3))[,
-                                                            `:=`(`Fiscal Year` = str_c(year_key - 1, year_key, sep='-'),
-                                                                 Unitid = as.integer(params$unitid))] %>%
-  bind_rows(., metrics[Unitid == params$unitid])
+plot_me <-
+  function(metric) {
+    labels <-
+      metrics %>%
+      filter(Unitid == params$unitid,
+             Metric == metric) %>%
+      distinct(Alert, Warning) %>%
+      pivot_longer(1:2, names_to = 'label', values_to = 'Value') %>%
+      mutate(`Fiscal Year` = '2010-2011')
+    
+    metrics %>%
+      select(Unitid, `Institution Name`, State, Control, Metric, Alert, Warning) %>%
+      expand_grid(year_key = seq(max(metrics$year_key) + 1, max(metrics$year_key) + 3)) %>%
+      mutate(`Fiscal Year` = str_c(year_key - 1, year_key, sep='-')) %>%
+      bind_rows(metrics, .) %>%
+      filter(Unitid == params$unitid) %>%
+      group_by(Unitid, Metric) %>%
+      nest() %>%
+      ungroup() %>%
+      mutate(fit = map(data, run_model),
+             Trend = map2(fit, data, predict)) %>%
+      select(-fit) %>%
+      unnest(cols = c('data', 'Trend')) %>%
+      filter(Metric == metric) %>%
+      ggplot(aes(x = `Fiscal Year`,
+                 y = Value,
+                 group = 1)) +
+      geom_line(size = 1.5) +
+    # add linear trend line
+    geom_line(aes(y = Trend),
+              linetype = 'longdash',
+              size = 1,
+              color = '#7570b3') +
+    # add alert and warning lines
+    geom_hline(aes(yintercept = Alert),
+               linetype = 'dotted',
+               color = '#1b9e77',
+               size = 1) +
+    geom_hline(aes(yintercept = Warning),
+               linetype = 'dotted',
+               color = '#d95f02',
+               size = 1) +
+    # Add line labels
+    geom_text(aes(label = label,
+                  y = Value),
+              data = labels,
+              hjust = "left") +
+    labs(title = metric,
+         subtitle = inst,
+         y = metric)
+  }
 
-label <- data.table(
-    `UG First-time First Year Enrollment` = c(alert_line$Alert, warn_line$Warning),
-    `Fiscal Year` = '2010-2011',
-    label = c("Alert", "Warning")
-  )
-
-fit <- lm(`UG First-time First Year Enrollment` ~ year_key, data = df)
-df$pred <- predict(fit, df)
-  
-ggplot(data = df,
-       aes(x = `Fiscal Year`, y = `UG First-time First Year Enrollment`, group = 1)) +
-  geom_line(size = 1) +
-  # add linear trend line
-  geom_line(aes(y = pred),
-            linetype = 'longdash',
-            color = '#7570b3') +
-  # add alert and warning lines
-  geom_hline(data = alert_line,
-             aes(yintercept = Alert), linetype = 'dashed', color = '#1b9e77') +
-  geom_hline(data = warn_line,
-             aes(yintercept = Warning), linetype = 'dashed', color = '#d95f02') +
-  # Add line labels
-  geom_text(aes(label = label), data = label, hjust = "left") +
+plot_me('UG First-time First Year Enrollment') +
   # set y-axis to comma format
   scale_y_continuous(labels = scales::label_comma()) +
-  labs(title = 'First-year Enrollment',
-       subtitle = inst)
+  labs(title = 'Undergraduate First Year Enrollment')
 ```
 
 ## Retention
 
 ```{r}
-alert_line <- criteria[Control == sector & Metric == 'Retention', .(Alert)]
-warn_line <- criteria[Control == sector & Metric == 'Retention', .(Warning)]
-
-df <- data.table(year_key = seq(max(metrics$year_key) + 1,
-                                max(metrics$year_key) + 3))[,
-                                                            `:=`(`Fiscal Year` = str_c(year_key - 1, year_key, sep='-'),
-                                                                 Unitid = as.integer(params$unitid))] %>%
-  bind_rows(., metrics[Unitid == params$unitid])
-
-fit <- lm(Retention ~ year_key, data = df)
-df$pred <- predict(fit, df)
-  
-label <- data.table(
-    Retention = c(alert_line$Alert, warn_line$Warning),
-    `Fiscal Year` = '2010-2011',
-    label = c("Alert", "Warning")
-  )
-
-ggplot(data = df,
-       aes(x = `Fiscal Year`, y = Retention, group = 1)) +
-  geom_line(size = 1) +
-  # add linear trend line
-  geom_line(aes(y = pred),
-            linetype = 'longdash',
-            color = '#7570b3') +
-  # add alert and warning lines
-  geom_hline(data = alert_line,
-             aes(yintercept = Alert), linetype = 'dashed', color = '#1b9e77') +
-  geom_hline(data = warn_line,
-             aes(yintercept = Warning), linetype = 'dashed', color = '#d95f02') +
-  # Add line labels
-  geom_text(aes(label = label), data = label, hjust = "left") +
-  # set y-axis to percent format
-  scale_y_continuous(labels = scales::label_percent()) +
-  labs(title = 'Retention',
-       subtitle = inst)
+plot_me('Retention') +
+  # set y-axis to comma format
+  scale_y_continuous(labels = scales::label_percent())
 ```
 
 ## Market Price
 
 ```{r}
-inst_val <- metrics[Unitid == params$unitid][order(year_key)][, .(ref = first(`Market Price`))]
-alert_line <- criteria[Control == sector & Metric == 'Market Price', .(Alert = (1 + Alert) * inst_val$ref)]
-warn_line <- criteria[Control == sector & Metric == 'Market Price', .(Warning = (1 + Warning) * inst_val$ref)]
-
-df <- data.table(year_key = seq(max(metrics$year_key) + 1,
-                                max(metrics$year_key) + 3))[,
-                                                            `:=`(`Fiscal Year` = str_c(year_key - 1, year_key, sep='-'),
-                                                                 Unitid = as.integer(params$unitid))] %>%
-  bind_rows(., metrics[Unitid == params$unitid])
-
-fit <- lm(`Market Price` ~ year_key, data = df)
-df$pred <- predict(fit, df)
-  
-label <- data.table(
-    `Market Price` = c(alert_line$Alert, warn_line$Warning),
-    `Fiscal Year` = '2010-2011',
-    label = c("Alert", "Warning")
-  )
-
-ggplot(data = df,
-       aes(x = `Fiscal Year`, y = `Market Price`, group = 1)) +
-  geom_line(size = 1) +
-  # add linear trend line
-  geom_line(aes(y = pred),
-            linetype = 'longdash',
-            color = '#7570b3') +
-  # add alert and warning lines
-  geom_hline(data = alert_line,
-             aes(yintercept = Alert), linetype = 'dashed', color = '#1b9e77') +
-  geom_hline(data = warn_line,
-             aes(yintercept = Warning), linetype = 'dashed', color = '#d95f02') +
-  # Add line labels
-  geom_text(aes(label = label), data = label, hjust = "left") +
-  # set y-axis to dollar format
-  scale_y_continuous(labels = scales::label_dollar()) +
-  labs(title = 'Market Price',
-       subtitle = inst)
+plot_me('Market Price') +
+  # set y-axis to comma format
+  scale_y_continuous(labels = scales::label_dollar())
 ```
 
 ## Endowment/Expenses (Privates) or State Appropriations (Publics)
 
 ```{r}
 if (sector == 'Public') {
-  inst_val <- metrics[Unitid == params$unitid][order(year_key)][, .(ref = first(`State Appropriations`))]
-  alert_line <- criteria[Control == sector & Metric == 'State Appropriations', .(Alert = (1 + Alert) * inst_val$ref)]
-  warn_line <- criteria[Control == sector & Metric == 'State Appropriations', .(Warning = (1 + Warning) * inst_val$ref)]
-  
-  df <- data.table(year_key = seq(max(metrics$year_key) + 1,
-                                  max(metrics$year_key) + 3))[,
-                                                              `:=`(`Fiscal Year` = str_c(year_key - 1, year_key, sep='-'),
-                                                                   Unitid = as.integer(params$unitid))] %>%
-    bind_rows(., metrics[Unitid == params$unitid])
-  
-  fit <- lm(`State Appropriations` ~ year_key, data = df)
-  df$pred <- predict(fit, df)
-    
-  label <- data.table(
-      `State Appropriations` = c(alert_line$Alert, warn_line$Warning),
-      `Fiscal Year` = '2010-2011',
-      label = c("Alert", "Warning")
-    )
-
-  ggplot(data = df,
-         aes(x = `Fiscal Year`, y = `State Appropriations`, group = 1)) +
-    geom_line(size = 1) +
-    # add linear trend line
-    geom_line(aes(y = pred),
-              linetype = 'longdash',
-              color = '#7570b3') +
-    # add alert and warning lines
-    geom_hline(data = alert_line,
-               aes(yintercept = Alert), linetype = 'dashed', color = '#1b9e77') +
-    geom_hline(data = warn_line,
-               aes(yintercept = Warning), linetype = 'dashed', color = '#d95f02') +
-    # Add line labels
-    geom_text(aes(label = label), data = label, hjust = "left") +
+  plot_me('State Appropriations') +
     # set y-axis to dollar format
     scale_y_continuous(labels = scales::label_dollar(scale = .000001,
-                                                     suffix = 'M')) +
-    labs(title = 'State Appropriations',
-         subtitle = inst)
+                                                     suffix = 'M'))
 } else {
-  inst_val <- metrics[Unitid == params$unitid][order(year_key)][, .(ref = first(`Endowment/Expenses`))]
-  alert_line <- criteria[Control == sector & Metric == 'Endowment/Expenses', .(Alert = (1 + Alert) * inst_val$ref)]
-  warn_line <- criteria[Control == sector & Metric == 'Endowment/Expenses', .(Warning = (1 + Warning) * inst_val$ref)]
-  
-  df <- data.table(year_key = seq(max(metrics$year_key) + 1,
-                                  max(metrics$year_key) + 3))[,
-                                                              `:=`(`Fiscal Year` = str_c(year_key - 1, year_key, sep='-'),
-                                                                   Unitid = as.integer(params$unitid))] %>%
-    bind_rows(., metrics[Unitid == params$unitid])
-  
-  fit <- lm(`Endowment/Expenses` ~ year_key, data = df)
-  df$pred <- predict(fit, df)
-    
-  label <- data.table(
-      `Endowment/Expenses` = c(alert_line$Alert, warn_line$Warning),
-      `Fiscal Year` = '2010-2011',
-      label = c("Alert", "Warning")
-    )
-
-  ggplot(data = df,
-         aes(x = `Fiscal Year`, y = `Endowment/Expenses`, group = 1)) +
-    geom_line(size = 1) +
-    # add linear trend line
-    geom_line(aes(y = pred),
-              linetype = 'longdash',
-              color = '#7570b3') +
-    # add alert and warning lines
-    geom_hline(data = alert_line,
-               aes(yintercept = Alert), linetype = 'dashed', color = '#1b9e77') +
-    geom_hline(data = warn_line,
-               aes(yintercept = Warning), linetype = 'dashed', color = '#d95f02') +
-    # Add line labels
-    geom_text(aes(label = label), data = label, hjust = "left") +
+  plot_me('Endowment/Expenses') +
     # set y-axis to comma format
     scale_y_continuous(labels = scales::label_comma(scale = 2)) +
-    labs(title = 'Endowment/Expenses',
-         subtitle = inst)
+    labs(title = 'Endowment to Expenses',
+         caption = 'Expenses = Total Expenses net of Hospital Expenses')
 }
-```
-```{r}
-metrics[Unitid == params$unitid][order(year_key)] # [, .(ref = first(`Endowment/Expenses`))]
 ```
 
 # Other Useful Stuff
 
 ## Color Palette
 
-Use the following to select the color palette if you have difficulty with the defaults
+Some people have difficulty with certain color palettes, so I've used colors from one of the colorblind "safe" palettes in the default plots.  However, these may not work for all users -- they may have different sensitivities or may prefer a different choice of colors.  If you prefer a different palette and want to use a default, the resources below provide some guidance on using the [Color Brewer](https://colorbrewer2.org/#type=qualitative&scheme=Accent&n=3) palettes.
 
 ### Palette Names
 
