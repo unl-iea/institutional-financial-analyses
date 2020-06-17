@@ -156,3 +156,4 @@ TEST.*
 test*
 .vscode
 scraps.md
+normed_metrics.*
