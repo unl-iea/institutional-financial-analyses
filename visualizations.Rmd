@@ -15,10 +15,9 @@ params:
 ```{r setup}
 # libraries
 library(knitr)
-library(hexbin)
-library(WVPlots)
 library(janitor)
 library(lubridate)
+library(broom)
 library(tidyverse)
 library(data.table)
 library(RColorBrewer)
@@ -324,3 +323,21 @@ brewer.pal.info
 display.brewer.all(n=NULL, type="qual", select=NULL, exact.n=TRUE, 
 colorblindFriendly=FALSE)
 ```
+## Save Outfiles
+
+The following will save the long format data to two files:
+
+* data/normed_metrics.csv to be used by software that can read CSV files
+* app/data/normed_metrics.RDS to be used by a Shiny app
+
+```{r}
+system.time({
+  metrics %>%
+    write_csv('data/normed_metrics.csv',
+              na = '')
+  
+  metrics %>%
+    saveRDS('app/data/normed_metrics.RDS')
+})
+```
+
