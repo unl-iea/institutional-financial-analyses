@@ -88,14 +88,13 @@ system.time({
       keyby = .(Unitid, Metric)]
 
     # get reference institution and sector
-  inst <- stress[Unitid == params$unitid, `Institution Name`, drop = TRUE]
-  sector <- stress[Unitid == params$unitid, Control, drop = TRUE]
+    inst <- stress[Unitid == params$unitid, `Institution Name`, drop = TRUE]
+    sector <- stress[Unitid == params$unitid, Control, drop = TRUE]
   
   # metric names for sector of institution
   metric_names <- ifelse(sector == 'Public', 'State Appropriations', 'Endowment/Expenses') %>%
     c(., c('UG First-time First Year Enrollment', 'Retention', 'Market Price'))
-
-
+  
   # housekeeping
   rm(criteria)
 })
@@ -325,10 +324,11 @@ colorblindFriendly=FALSE)
 ```
 ## Save Outfiles
 
-The following will save the long format data to two files:
+The following will save the long format data to three files:
 
 * data/normed_metrics.csv to be used by software that can read CSV files
 * app/data/normed_metrics.RDS to be used by a Shiny app
+* app/data/stress.RDS to be used by Shiny app
 
 ```{r}
 system.time({
@@ -336,8 +336,30 @@ system.time({
     write_csv('data/normed_metrics.csv',
               na = '')
   
-  metrics %>%
-    saveRDS('app/data/normed_metrics.RDS')
+  new_cases <-
+    metrics %>%
+    select(Unitid, `Institution Name`, State, Control, Metric, Alert, Warning) %>%
+    expand_grid(year_key = seq(max(metrics$year_key) + 1, max(metrics$year_key) + 3)) %>%
+    mutate(`Fiscal Year` = str_c(year_key - 1, year_key, sep='-'))
+  
+  # metrics %>%
+  #   drop_na() %>%
+  #   group_by(Unitid, Metric) %>%
+  #   nest() %>%
+  #   ungroup() %>%
+  #   mutate(fit = map(data, run_model)) %>%
+  #   unnest(cols = c('data')) %>%
+  #   bind_rows(new_cases) %>%
+  #   group_by(Unitid, Metric) %>%
+  #   nest() %>%
+  #   ungroup() %>%
+  #   mutate(Trend = map2(fit, data, predict)) %>%
+  #   unnest(cols = c('data', 'Trend')) %>%
+  #   select(-fit) %>%
+  #   saveRDS('app/data/normed_metrics.RDS')
+  
+  stress %>%
+    saveRDS('app/data/stress.RDS')
 })
 ```
 
