@@ -103,11 +103,15 @@ system.time({
 
 # Reference Institution Metric Values
 
+The following table displays the values of the four metrics for the reference institution that was selected based on the _unitid_ parameter.
+
 ```{r}
 metrics[Unitid == params$unitid]
 ```
 
 # Reference Institution Stess Score
+
+The following table displays the stress score, change scores for each metric, and the indicators for the twelve items that comprise the stress score.
 
 ```{r}
 stress[Unitid == params$unitid]
@@ -115,7 +119,11 @@ stress[Unitid == params$unitid]
 
 # Plots of Reference Institution Versus Sector
 
-## First Year Enrollment
+The following plots show the reference institution as a line with diamonds at the metric values.  The underlying box plot is for the appropriate sector of the reference institution: _Four Year Public Institutions_ or _Four Year Private Institutions_.
+
+## Undergraduate First-time First-year Enrollment
+
+This metric is derived from the total headcount of first-time first-year degree-seeking undergraduates from IPEDS-EF.
 
 ```{r}
 # function to create standard-formatted box plots with reference institution
@@ -153,6 +161,8 @@ box_me('UG First-time First Year Enrollment') +
 
 ## Retention
 
+_Retention_ is the number reported on the IPEDS-EFD survey.  Definitionally, it is the percentage of the prior year's full-time first-time first-year degree-seeking cohort who returned in the year shown.
+
 ```{r}
 box_me('Retention') +
   # set y-axis to percentage format
@@ -161,6 +171,12 @@ box_me('Retention') +
 
 ## Market Price
 
+_Market Price_ is the average undergraduate tuition net of first-time grant aid.  For publics, the average undergraduate tuition is estimated as in-state tuition times the proportion of in-state first-year students plus out-of-state tuition times the proportion of out-of-state first-year students.
+
+_Market Price_ moves based on change to (1) the average tuition amount; (2) the average grant aid; or (3) both.  Average tuition and average grant aid were adjusted for inflation using the third quarter Gross Domestic Product (GDP) for each year from the Federal Bank of St. Louis.
+
+Average tuition comes from the IPEDS-IC Academic Year Charges survey.  Average first-year grant aid comes from IPEDS-SFA.
+
 ```{r}
 box_me('Market Price') +
   # set y-axis to dollar format
@@ -168,7 +184,9 @@ box_me('Market Price') +
   labs(caption = 'Dollars adjusted for inflation using GDP.')
 ```
 
-## Endowment/Expenses (Privates) or State Appropriations (Publics)
+## Resource Metric
+
+The resource metric for private instittuions is the ratio of end-of-year endowment divided by total expenses net of hospital expenses.  For public institutions, this metric is the state appropriations.  For GASB institutions, this data comes from IPEDS-F1A.  For FASB institutions, this comes from IPEDS-F2.
 
 ```{r}
 if (sector == 'Public') {
@@ -186,6 +204,7 @@ if (sector == 'Public') {
 
 # Plot of Normed Metrics
 
+The following plot norms each institutions values for all four metrics by dividing by the first year's value and multiplying by 100.  The corresponding _Normed Value_ is 100 for year 1 and can be easily interpreted as a percent change by subtracting 100 from the value.  (E.g., a value of 110 is 110 - 100 = 10 or 10% increase.  Similarly, a value of 80 is 80 - 100 = -20 or a 20% decrease).
 
 ```{r}
 ggplot(data = metrics[Unitid == params$unitid],
@@ -204,6 +223,14 @@ ggplot(data = metrics[Unitid == params$unitid],
 ```
 
 # Plots of Institutional Metrics
+
+The following plots share these common attributes:
+
+* The heavy line is the institution's actual values on that metric over time.
+* The dashed line is the linear trend for the metric.
+* The dotted horizontal lines are the Alert and Warning criteria.
+
+If an institution's eighth year value is at or below the Alert line, 1 stress point is added.  If that value is at the warning level, an additional 1 point is added.  Similarly, if the trend line terminates at the Alert level, another stress point is added.  For each metric, three stress points (or zero) are possible.  Across the four metrics, an institution can accumulate a possible total of 12 points.  Taken in combination, all four plots show where an institution is considered stressed by the model.
 
 ## First Year Enrollment
 
@@ -288,7 +315,9 @@ plot_me('Market Price') +
   scale_y_continuous(labels = scales::label_dollar())
 ```
 
-## Endowment/Expenses (Privates) or State Appropriations (Publics)
+## Resource Metric
+
+Reminder: Endowment/Expenses (Privates) or State Appropriations (Publics)
 
 ```{r}
 if (sector == 'Public') {
