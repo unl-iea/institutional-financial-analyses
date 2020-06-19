@@ -342,21 +342,8 @@ system.time({
     expand_grid(year_key = seq(max(metrics$year_key) + 1, max(metrics$year_key) + 3)) %>%
     mutate(`Fiscal Year` = str_c(year_key - 1, year_key, sep='-'))
   
-  # metrics %>%
-  #   drop_na() %>%
-  #   group_by(Unitid, Metric) %>%
-  #   nest() %>%
-  #   ungroup() %>%
-  #   mutate(fit = map(data, run_model)) %>%
-  #   unnest(cols = c('data')) %>%
-  #   bind_rows(new_cases) %>%
-  #   group_by(Unitid, Metric) %>%
-  #   nest() %>%
-  #   ungroup() %>%
-  #   mutate(Trend = map2(fit, data, predict)) %>%
-  #   unnest(cols = c('data', 'Trend')) %>%
-  #   select(-fit) %>%
-  #   saveRDS('app/data/normed_metrics.RDS')
+  metrics %>%
+    saveRDS('app/data/metrics.RDS')
   
   stress %>%
     saveRDS('app/data/stress.RDS')
