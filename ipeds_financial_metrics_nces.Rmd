@@ -176,7 +176,8 @@ system.time({
     group_by(parent_id, year_key, time_status, career_level) %>%
     summarize(headcount = sum(headcount, na.rm = TRUE)) %>%
     rename(unitid = parent_id) %>%
-    collect()
+    collect() %>%
+    ungroup()
 })
 ```
 
