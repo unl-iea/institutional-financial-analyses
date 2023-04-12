@@ -4,14 +4,19 @@
 #                                                                 #
 ###################################################################
 
-# create data directory
+# create data and output directorys
 system.time({
-  if (!dir.exists(str_c(getwd(), 'data', sep='/'))) {
-    dir.create(str_c(getwd(), 'data', sep='/'))
+  if (!dir.exists(paste(getwd(), 'data', sep = '/'))) {
+    dir.create(paste(getwd(), 'data', sep = '/'))
   }
 })
 
 
+system.time({
+  if (!dir.exists(paste(getwd(), 'output', sep = '/'))) {
+    dir.create(paste(getwd(), 'output', sep = '/'))
+  }
+})
 
 # install packages (optional)
 # I'd advise doing this by hand, but here is a bit of code to do this in one pass
@@ -53,7 +58,7 @@ recent_year <- 2018
 
 
 # create a file database (db) to store IPEDS data
-db <- dbConnect(RSQLite::SQLite(), str_c(getwd(), 'data/db.sqlite', sep='/'))
+db <- dbConnect(RSQLite::SQLite(), paste(getwd(), 'data/db.sqlite', sep = '/'))
 
 
 
@@ -408,12 +413,12 @@ system.time({
   ipeds_years <-
     ipeds_years %>%
     rename(year_key = collection_year) %>%
-    mutate(fiscal_year = str_c(year_key - 1,
+    mutate(fiscal_year = paste(year_key - 1,
                                year_key,
-                               sep='-'),
-           academic_year = str_c(year_key - 1,
+                               sep = '-'),
+           academic_year = paste(year_key - 1,
                                  year_key,
-                                 sep='-'),
+                                 sep = '-'),
            calendar_year_fall = year_key - 1,
            calendar_year_spring = year_key)
   
