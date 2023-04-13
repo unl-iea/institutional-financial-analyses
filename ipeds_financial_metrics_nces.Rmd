@@ -100,7 +100,7 @@ weights <-
 
 ```{r}
 # open database connection
-db <- dbConnect(RSQLite::SQLite(), str_c(getwd(), 'data/db.sqlite', sep='/'))
+db <- dbConnect(RSQLite::SQLite(), paste(getwd(), 'data/db.sqlite', sep = '/'))
 ```
 
 ## IPEDS Data
@@ -111,13 +111,13 @@ db <- dbConnect(RSQLite::SQLite(), str_c(getwd(), 'data/db.sqlite', sep='/'))
 # access data via net
 system.time({
   ic <-
-   tbl(db, 'characteristics') %>%
+   tbl(db, 'characteristics') |>
    filter(distnced == 0,
-          ft_ug == 1) %>%
+          ft_ug == 1) |>
    select(unitid, year_key)
 
    institutions <- 
-   tbl(db, 'directory') %>%
+   tbl(db, 'directory') |>
    filter(level_institution == 1,
           bea_region < 9,
           title4_eligible == 1,
@@ -125,14 +125,14 @@ system.time({
           control %in% 1:2)
     
  institutions <-
-   institutions %>%
-   inner_join(ic, by = c('unitid', 'year_key')) %>%
-   group_by(unitid) %>%
-   summarize(year_key = max(year_key)) %>%
-   ungroup() %>%
-   inner_join(institutions, by = c('unitid', 'year_key')) %>%
+   institutions |>
+   inner_join(ic, by = c('unitid', 'year_key')) |>
+   group_by(unitid) |>
+   summarize(year_key = max(year_key)) |>
+   ungroup() |>
+   inner_join(institutions, by = c('unitid', 'year_key')) |>
    mutate(close_year = ifelse(close_year > 0, close_year, NA),
-          Closed = ifelse(is.na(close_year), 0, 1)) %>%
+          Closed = ifelse(is.na(close_year), 0, 1)) |>
    select(unitid,
           `Institution Name` = institution_name,
           City = city,
@@ -144,8 +144,8 @@ system.time({
           `Close Year` = close_year,
           `Close Date` = close_date,
           Longitude = longitude,
-          Latitude = latitude) %>%
-   collect() %>%
+          Latitude = latitude) |>
+   collect() |>
    mutate(Control = recode(Control,
                            `1` = 'Public',
                            `2` = 'Private',
@@ -164,19 +164,19 @@ system.time({
 system.time({
   # flags to roll up enrollments to match finance
   submissions <-
-    tbl(db, 'submissions') %>%
-    filter(year_key >= year_param) %>%
-    mutate(parent_id = ifelse(prch_f %in% c('1', '2', '3'), idx_f, unitid)) %>%
+    tbl(db, 'submissions') |>
+    filter(year_key >= year_param) |>
+    mutate(parent_id = ifelse(prch_f %in% c('1', '2', '3'), idx_f, unitid)) |>
     select(unitid, year_key, parent_id)
   
   # total_enrollment = fall enrollment (EF) table
   total_enrollment <-
-    tbl(db, 'fall_enrollment') %>%
-    inner_join(submissions, by = c('unitid', 'year_key')) %>%
-    group_by(parent_id, year_key, time_status, career_level) %>%
-    summarize(headcount = sum(headcount, na.rm = TRUE)) %>%
-    rename(unitid = parent_id) %>%
-    collect() %>%
+    tbl(db, 'fall_enrollment') |>
+    inner_join(submissions, by = c('unitid', 'year_key')) |>
+    group_by(parent_id, year_key, time_status, career_level) |>
+    summarize(headcount = sum(headcount, na.rm = TRUE)) |>
+    rename(unitid = parent_id) |>
+    collect() |>
     ungroup()
 })
 ```
@@ -187,21 +187,21 @@ system.time({
 # access data via net
 system.time({
   gdp <-
-    tbl(db, 'gdp') %>%
+    tbl(db, 'gdp') |>
     filter(year_key >= year_param,
-           month == 4) %>%
+           month == 4) |>
     select(year_key, gdp)
 
     finance <- 
-      tbl(db, 'finance') %>%
-      inner_join(gdp, by = 'year_key') %>%
+      tbl(db, 'finance') |>
+      inner_join(gdp, by = 'year_key') |>
       filter(field %in% c('f2b01', 'f2b02', 'f2d01', 'f2a03a', 'f2a17',
                           'f2a18', 'f2c05', 'f2c06', 'f2c08', 'f2c10',
                           'f2d01', 'f2e135', 'f2h02',
                           'f1d01', 'f1d02', 'f1a07', 'f1a27t4',
                           'f1a284', 'f1e05', 'f1e06', 'f1e08', 'f1e10',
-                          'f1b01', 'f1c19dp', 'f1h02')) %>%
-      collect() %>%
+                          'f1b01', 'f1c19dp', 'f1h02')) |>
+      collect() |>
       mutate(amount = ifelse(is.na(amount), 0, amount / gdp),
              field = recode(field,
                             'f2b01' = 'Total Revenues',
@@ -227,8 +227,8 @@ system.time({
                             'f1e10' = 'Total Discounts',
                             'f1b01' = 'Tuition Revenue',
                             'f1c19dp' = 'Depreciation Expense',
-                            'f1h02' = 'Endowment EOY')) %>%
-      select(-gdp) %>%
+                            'f1h02' = 'Endowment EOY')) |>
+      select(-gdp) |>
       pivot_wider(names_from = field,
                   values_from = amount)
     
@@ -244,11 +244,11 @@ Assigns fiscal and calendar years, aligning the collection cycles for IPEDS Data
 # access data via net
 system.time({
   years <- 
-    tbl(db, 'ipeds_years') %>%
+    tbl(db, 'ipeds_years') |>
     select(year_key,
            fiscal_year,
            academic_year,
-           calendar_year_fall) %>%
+           calendar_year_fall) |>
     collect()
 })
 
@@ -269,23 +269,23 @@ rm(submissions, db)
 ```{r}
 system.time({
   fte <-
-    total_enrollment %>%
-    inner_join(institutions, by = c('unitid')) %>%
+    total_enrollment |>
+    inner_join(institutions, by = c('unitid')) |>
     inner_join(weights, by = c('time_status', 
                                'career_level',
                                'Control',
-                               'Level')) %>%
-    mutate(fte = headcount * weight) %>%
-    group_by(unitid, year_key, career_level) %>%
+                               'Level')) |>
+    mutate(fte = headcount * weight) |>
+    group_by(unitid, year_key, career_level) |>
     summarize(Headcount = sum(headcount, na.rm = TRUE),
-              FTE = sum(fte, na.rm = TRUE)) %>%
-    ungroup() %>%
+              FTE = sum(fte, na.rm = TRUE)) |>
+    ungroup() |>
     pivot_wider(names_from = career_level,
-                values_from = c(Headcount, FTE)) %>%
+                values_from = c(Headcount, FTE)) |>
     replace_na(replace = list(Headcount_Graduate = 0,
                               Headcount_Undergraduate = 0,
                               FTE_Graduate = 0,
-                              FTE_Undergraduate = 0)) %>%
+                              FTE_Undergraduate = 0)) |>
     mutate(`Total FTE` = FTE_Undergraduate + FTE_Graduate,
            `Total Heacount` = Headcount_Undergraduate + Headcount_Graduate)
   
@@ -298,15 +298,15 @@ system.time({
 ```{r}
 system.time({
   metrics <-
-    institutions %>%
-    inner_join(fte, by = c('unitid')) %>%
-    inner_join(finance, by = c('unitid', 'year_key')) %>%
-    inner_join(years, by = 'year_key') %>%
-    select(-year_key) %>%
+    institutions |>
+    inner_join(fte, by = c('unitid')) |>
+    inner_join(finance, by = c('unitid', 'year_key')) |>
+    inner_join(years, by = 'year_key') |>
+    select(-year_key) |>
     rename(Unitid = unitid,
            `Fiscal Year` = fiscal_year,
            `Academic Year` = academic_year,
-           `Calendar Year (Fall)` = calendar_year_fall) %>%
+           `Calendar Year (Fall)` = calendar_year_fall) |>
     mutate(Margin = `Total Revenues` - `Total Expenses`,
            `Margin per FTE (000)` = Margin / 1000 / `Total FTE`,
            `Gross tuition` = `Tuition Revenue` + `Allowances to Tuition and Fees`,
@@ -315,7 +315,7 @@ system.time({
            `Percentage of Grants from Unfunded Sources` = `Institutional Grants (Unfunded)` / `Total Discounts`,
            `Age of Plant` = `Accumulated Depreciation` / `Depreciation Expense`)
   
-  metrics %>%
+  metrics |>
     write_csv('data/ipeds_metrics.csv',
               na = '')
 })
@@ -326,7 +326,7 @@ system.time({
 ## Bar Plot
 
 ```{r}
-metrics %>%
+metrics |>
   filter(`Fiscal Year` == '2017-2018',
          Unitid %in% c('181464',
                        '181215',
@@ -336,8 +336,8 @@ metrics %>%
                        '181783',
                        '181446',
                        '181738',
-                       '181428')) %>%
-  mutate(`Institution Name` = fct_reorder(`Institution Name`, `Tuition dependence`)) %>%
+                       '181428')) |>
+  mutate(`Institution Name` = fct_reorder(`Institution Name`, `Tuition dependence`)) |>
   ggplot(aes(x = `Tuition dependence`,
              y = `Institution Name`,
              fill = Control)) +
@@ -354,13 +354,13 @@ metrics %>%
 ## Scatter Plot of Tuition Revenue and Tuition Dependence
 
 ```{r}
-metrics %>%
+metrics |>
   filter(`Fiscal Year` == '2017-2018',
          Control %in% c('Private', 'Public'),
-         !is.na(Margin)) %>%
+         !is.na(Margin)) |>
   mutate(`Margin Category` = ifelse(Margin < 0, 'Loss', 'Even'),
          `Margin Category` = ifelse(Margin > 0, 'Gain', `Margin Category`),
-         `Institutional Grants (Unfunded)` = `Institutional Grants (Unfunded)` / `Total FTE`) %>%
+         `Institutional Grants (Unfunded)` = `Institutional Grants (Unfunded)` / `Total FTE`) |>
   ggplot(aes(x = `Tuition dependence`,
              y = `Institutional Grants (Unfunded)`,
              color = `Margin Category`)) +
@@ -378,16 +378,16 @@ metrics %>%
 ## Heatmap
 
 ```{r}
-metrics %>%
+metrics |>
   filter(`Fiscal Year` == '2017-2018',
-         State == 'NE') %>%
+         State == 'NE') |>
   mutate(`Revenues per FTE` = `Total Revenues` / `Total FTE`,
          `Tuition per FTE` = `Tuition Revenue` / `Total FTE`,
          `Discount per FTE` = `Total Discounts` / `Total FTE`,
          `Discount per FTE` = max(`Discount per FTE`) - `Discount per FTE`,
          `Average Unfunded Grant` = `Institutional Grants (Unfunded)` / `Total FTE`,
          `Endowment per FTE` = `Endowment EOY` / `Total FTE`,
-         `Tuition dependence` = 1 - `Tuition dependence`) %>%
+         `Tuition dependence` = 1 - `Tuition dependence`) |>
   select(`Institution Name`,
          Control,
          `Revenues per FTE`,
@@ -396,13 +396,13 @@ metrics %>%
          `Average Unfunded Grant`,
          `Endowment per FTE`,
          `Tuition dependence`
-         ) %>%
-  drop_na() %>%
+         ) |>
+  drop_na() |>
   pivot_longer(cols = 3:8,
-               names_to = 'variable') %>%
-  group_by(variable) %>%
-  mutate(rescale = scale(value)) %>%
-  ungroup() %>%
+               names_to = 'variable') |>
+  group_by(variable) |>
+  mutate(rescale = scale(value)) |>
+  ungroup() |>
   ggplot(aes(x = variable,
              y = `Institution Name`)) +
     geom_tile(aes(fill = rescale),
