@@ -270,7 +270,7 @@ load_charges <- function(year)
 load_sfa <- function(year)
 {
   connection <- open_db_connection(year)
-  if (year < 2008) {
+  if (year < 2009) {
     df <- fetch_table(connection,
                       paste0('SFA', substr(year - 1, 3, 4), substr(year, 3, 4)))
   } else {
@@ -308,7 +308,7 @@ load_fasb <- function(year)
        measure.vars = colnames(df)[-1],
        variable.name = 'field',
        value.name = 'amount',
-       na.rm = T)[, value := as.double(value)]
+       na.rm = T)[, amount := as.double(amount)]
 }
 
 
@@ -326,5 +326,5 @@ load_gasb <- function(year)
        measure.vars = colnames(df)[-1],
        variable.name = 'field',
        value.name = 'amount',
-       na.rm = T)[, value := as.double(value)]
+       na.rm = T)[, amount := as.double(amount)]
 }
