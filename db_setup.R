@@ -24,11 +24,7 @@ system.time({
 # COMMENT TO DEATIVATE
 system.time({
   packages <-
-    c('RSQLite',
-      'knitr',
-      'DBI',
-      'odbc',
-      'dbplyr',
+    c('knitr',
       'janitor',
       'lubridate',
       'broom',
@@ -36,17 +32,13 @@ system.time({
       'data.table')
   
   for (pkg in packages) {
-    if(pkg %in% rownames(installed.packages()) == FALSE) {
+    if (pkg %in% rownames(installed.packages()) == FALSE) {
       install.packages(pkg, dependencies = TRUE)
       }
   }
 })
 
 # libraries
-library(DBI)
-library(odbc)
-library(dbplyr)
-library(RSQLite)
 library(lubridate)
 library(janitor)
 library(tidyverse)
@@ -66,7 +58,7 @@ recent_year <- ifelse(month(today()) > 9,
 
 
 # create a file database (db) to store IPEDS data
-db <- dbConnect(RSQLite::SQLite(), paste(getwd(), 'data/db.sqlite', sep = '/'))
+# db <- dbConnect(RSQLite::SQLite(), paste(getwd(), 'data/db.sqlite', sep = '/'))
 
 
 
@@ -91,8 +83,8 @@ system.time({
         gdp = as.double(gdpdef) / 100)]
 
   # write table to db
-  dbWriteTable(db, "gdp", gdp, overwrite = TRUE)
-  
+  # dbWriteTable(db, "gdp", gdp, overwrite = TRUE)
+  saveRDS(gdp, 'data/gdp.rds')
   # housekeeping
   rm(gdp)
 })
@@ -219,11 +211,12 @@ system.time({
            cbsa_type = cbsatype,
            country_fips = countycd,
            country_name = countynm,
-           longitude = longitud)
+           longitude = longitud) |>
+    as.data.table()
   
   # write table to db
-  dbWriteTable(db, "directory", directory, overwrite = TRUE)
-  
+  # dbWriteTable(db, "directory", directory, overwrite = TRUE)
+  saveRDS(directory, 'data/directory.rds')
   # housekeeping
   rm(directory)
 })
@@ -240,11 +233,12 @@ system.time({
     select(year_key, data) |>
     unnest(cols = data) |>
     mutate(distnced = ifelse(distnced == '1', 1, 0),
-           ft_ug = ifelse(ft_ug == '1', 1, 0))
+           ft_ug = ifelse(ft_ug == '1', 1, 0)) |>
+    as.data.table()
   
   # write table to db
-  dbWriteTable(db, "characteristics", characteristics, overwrite = TRUE)
-  
+  # dbWriteTable(db, "characteristics", characteristics, overwrite = TRUE)
+  saveRDS(characteristics, 'data/characteristics.rds')
   # housekeeping
   rm(characteristics)
 })
@@ -259,11 +253,12 @@ system.time({
     mutate(data = map(collection_year, load_submissions),
            year_key = collection_year + 1) |>
     select(year_key, data) |>
-    unnest(cols = data)
+    unnest(cols = data) |>
+    as.data.table()
   
   # write table to db
-  dbWriteTable(db, "submissions", submissions, overwrite = TRUE)
-  
+  # dbWriteTable(db, "submissions", submissions, overwrite = TRUE)
+  saveRDS(submissions, 'data/submissions.rds')
   # housekeeping
   rm(submissions)
 })
@@ -280,11 +275,12 @@ system.time({
                  names_to = "variable", 
                  values_to = "headcount") |>
     separate(variable, c("survey", "demographic_key"), sep = 2) |>
-    select(-c(survey, collection_year))
+    select(-c(survey, collection_year)) |>
+    as.data.table()
   
   # write table to db
-  dbWriteTable(db, "fall_enrollment", fall_enrollment, overwrite = TRUE)
-  
+  # dbWriteTable(db, "fall_enrollment", fall_enrollment, overwrite = TRUE)
+  saveRDS(fall_enrollment, 'data/fall_enrollment.rds')
   # housekeeping
   rm(fall_enrollment)
 })
@@ -307,11 +303,12 @@ system.time({
     pivot_longer(cols = c(`Recent HS Graduates`, `Other First-time`),
                  names_to = 'cohort',
                  values_to = 'headcount',
-                 values_drop_na = TRUE)
+                 values_drop_na = TRUE) |>
+    as.data.table()
   
   # write table to db
-  dbWriteTable(db, "enrollment_by_state", enrollment_by_state, overwrite = TRUE)
-  
+  # dbWriteTable(db, "enrollment_by_state", enrollment_by_state, overwrite = TRUE)
+  saveRDS(enrollment_by_state, 'data/enrollment_by_state.rds')
   # housekeeping
   rm(enrollment_by_state)
 })
@@ -325,24 +322,23 @@ system.time({
     ipeds_years |>
     mutate(data = map(collection_year, load_retention),
            year_key = collection_year + 1) |>
-    unnest(cols = data)
+    unnest(cols = data) |>
+    as.data.table()
   
   if(!'grcohort' %in% colnames(retention)) {
     retention$grcohort <- 0
   }
   
-  retention <-
-    retention |>
-    mutate(gradrate_cohort = as.integer(grcohort),
-           entering_undergraduates = as.integer(ugentern),
-           percentage_of_class = as.numeric(pgrcohrt),
-           retention_ft = as.numeric(ret_pcf) / 100,
-           retention_pt = as.numeric(ret_pcp) / 100) |>
-    select(-collection_year)
+  retention[, `:=`(gradrate_cohort = as.integer(grcohort),
+                   entering_undergraduates = as.integer(ugentern),
+                   percentage_of_class = as.numeric(pgrcohrt),
+                   retention_ft = as.numeric(ret_pcf) / 100,
+                   retention_pt = as.numeric(ret_pcp) / 100,
+                   collection_year = NULL)]
   
   # write table to db
-  dbWriteTable(db, "retention", retention, overwrite = TRUE)
-  
+  # dbWriteTable(db, "retention", retention, overwrite = TRUE)
+  saveRDS(retention, 'data/retention.rds')
   # housekeeping
   rm(retention)
 })
@@ -357,11 +353,12 @@ system.time({
     mutate(data = map(collection_year, load_charges),
            year_key = collection_year + 1) |>
     unnest(cols = data) |>
-    select(unitid, year_key, field, value)
+    select(unitid, year_key, field, value) |>
+    as.data.table()
   
   # write table to db
-  dbWriteTable(db, "academic_year_charges", academic_year_charges, overwrite = TRUE)
-  
+  # dbWriteTable(db, "academic_year_charges", academic_year_charges, overwrite = TRUE)
+  saveRDS(academic_year_charges, 'data/academic_year_charges.rds')
   # housekeeping
   rm(academic_year_charges)
 })
@@ -376,11 +373,12 @@ system.time({
     ipeds_years |>
     mutate(data = map(collection_year, load_sfa)) |>
     rename(year_key = collection_year) |>
-    unnest(cols = data)
+    unnest(cols = data) |>
+    as.data.table()
   
   # write table to db
-  dbWriteTable(db, "student_financial_aid", student_financial_aid, overwrite = TRUE)
-  
+  # dbWriteTable(db, "student_financial_aid", student_financial_aid, overwrite = TRUE)
+  saveRDS(student_financial_aid, 'data/student_financial_aid.rds')
   # housekeeping
   rm(student_financial_aid)
 })
@@ -403,12 +401,12 @@ system.time({
            data = map(collection_year, load_gasb)) |>
     rename(year_key = collection_year) |>
     unnest(cols = data) |>
-    bind_rows(finance)
-  
+    bind_rows(finance) |>
+    as.data.table()
   
   # write table to db
-  dbWriteTable(db, "finance", finance, overwrite = TRUE)
-  
+  # dbWriteTable(db, "finance", finance, overwrite = TRUE)
+  saveRDS(finance, 'data/finance.rds')
   # housekeeping
   rm(finance)
 })
@@ -428,15 +426,13 @@ system.time({
                                  year_key,
                                  sep = '-'),
            calendar_year_fall = year_key - 1,
-           calendar_year_spring = year_key)
+           calendar_year_spring = year_key) |>
+    as.data.table()
   
   # write table to db
-  dbWriteTable(db, "ipeds_years", ipeds_years, overwrite = TRUE)
-  
+  # dbWriteTable(db, "ipeds_years", ipeds_years, overwrite = TRUE)
+  saveRDS(ipeds_years, 'data/ipeds_years.rds')
   # housekeeping
   rm(ipeds_years)
 })
 
-
-# Disconnect database
-dbDisconnect(db)

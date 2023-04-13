@@ -82,6 +82,7 @@ library(lubridate)
 library(broom)
 library(hexbin)
 library(tidyverse)
+library(data.table)
 
 # set default document options
 knitr::opts_chunk$set(fig.width = 6,
@@ -123,8 +124,9 @@ system.time({
     filter(year_key > year_param - 8,
            year_key <= year_param) |>
     select(year_key, fiscal_year) |>
-    collect() |>
-    mutate(Index = row_number())
+    as.data.table()
+  
+  years[, Index := row_number()]
   
   submissions <-
     tbl(db, 'submissions') |>
