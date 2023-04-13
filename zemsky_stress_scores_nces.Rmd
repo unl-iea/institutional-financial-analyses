@@ -98,7 +98,7 @@ knitr::opts_chunk$set(fig.width = 6,
 set.seed(1965)
 
 # include user functions
-source(file="user_functions.R")
+source(file = "user_functions.R")
 ```
 
 # Import Data
@@ -400,13 +400,14 @@ system.time({
 })
 ```
 
-## Output Metrics File
+## Output Metrics Files
 
 ```{r}
 system.time({
   metrics |>
     write_csv('data/metrics.csv',
               na = '')
+  saveRDS(metrics, 'data/metrics.rds')
 })
 ```
 
@@ -551,7 +552,9 @@ system.time({
                  values_to = 'Value') |>
     arrange(Unitid, Control, Metric, Index) |>
     group_by(Unitid, Control, Metric) |>
-    mutate(Change = ifelse(Index == 8, (Value - lag(Value, 7)) / lag(Value, 7), (Value - lag(Value, 8)) / lag(Value, 8))
+    mutate(Change = ifelse(Index == 8,
+                           (Value - lag(Value, 7)) / lag(Value, 7),
+                           (Value - lag(Value, 8)) / lag(Value, 8))
            ) |>
     ungroup() |>
     drop_na() |>
@@ -612,6 +615,7 @@ system.time({
   stress_scores |>
     write_csv('data/stress.csv',
               na = '')
+  saveRDS(stress_scores, 'data/stress.rds')
 })
 ```
 
