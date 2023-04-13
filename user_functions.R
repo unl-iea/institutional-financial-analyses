@@ -270,12 +270,22 @@ load_charges <- function(year)
 load_sfa <- function(year)
 {
   connection <- open_db_connection(year)
-  p1 <- fetch_table(connection, paste0('SFA', year, '_P1'))
-  p2 <- fetch_table(connection, paste0('SFA', year, '_P2'))
+  if (year < 2008) {
+    df <- fetch_table(connection,
+                      paste0('SFA', substr(year - 1, 3, 4), substr(year, 3, 4)))
+  } else {
+    p1 <- fetch_table(connection,
+                      paste0('SFA', substr(year - 1, 3, 4), substr(year, 3, 4),
+                      '_P1'))
+    p2 <- fetch_table(connection,
+                      paste0('SFA', substr(year - 1, 3, 4), substr(year, 3, 4),
+                      '_P2'))
+    setkey(p1, unitid)
+    setkey(p2, unitid)
+    df <- p2[p1]
+  }
+  
   dbDisconnect(connection)
-  setkey(p1, unitid)
-  setkey(p2, unitid)
-  df <- p2[p1]
   melt(df,
        id.vars = 'unitid',
        measure.vars = colnames(df)[-1],
@@ -289,7 +299,9 @@ load_sfa <- function(year)
 load_fasb <- function(year)
 {
   connection <- open_db_connection(year)
-  df <- fetch_table(connection, paste0('F', year, '_F2'))
+  df <- fetch_table(connection,
+                    paste0('F', substr(year - 1, 3, 4), substr(year, 3, 4),
+                           '_F2'))
   dbDisconnect(connection)
   melt(df,
        id.vars = 'unitid',
@@ -305,7 +317,9 @@ load_fasb <- function(year)
 load_gasb <- function(year)
 {
   connection <- open_db_connection(year)
-  df <- fetch_table(connection, paste0('F', year, '_F1A'))
+  df <- fetch_table(connection,
+                    paste0('F', substr(year - 1, 3, 4), substr(year, 3, 4),
+                           '_F1A'))
   dbDisconnect(connection)
   melt(df,
        id.vars = 'unitid',
