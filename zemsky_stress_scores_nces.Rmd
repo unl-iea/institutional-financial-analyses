@@ -9,10 +9,10 @@ output:
 params:
   year:
     label: "Last year of series"
-    value: 2018
+    value: 2020
   unitid:
     label: "Reference Institution"
-    value: "181464"
+    value: 181464
 ---
 
 # Introduction
@@ -73,16 +73,12 @@ In addition to IPEDS, the model also uses Gross Domestic Product (GDP) deflators
 
 ```{r setup}
 # libraries
-library(knitr)
-library(DBI)
-library(odbc)
-library(dbplyr)
-library(RSQLite)
 library(lubridate)
 library(broom)
 library(hexbin)
 library(tidyverse)
 library(data.table)
+library(openxlsx)
 
 # set default document options
 knitr::opts_chunk$set(fig.width = 6,
@@ -107,274 +103,273 @@ source(file = "user_functions.R")
 ## Load Tables
 
 ```{r}
-system.time({
-  # create a file database (db) to store IPEDS data
-  db <- dbConnect(RSQLite::SQLite(), paste(getwd(), 'data/db.sqlite', sep = '/'))
-  
-  ic <-
-    tbl(db, 'characteristics') |>
-    filter(distnced == 0,
-           ft_ug == 1) |>
-    select(unitid, year_key)
-  
-  year_param <- params$year
-  
-  years <-
-    tbl(db, 'ipeds_years') |>
-    filter(year_key > year_param - 8,
-           year_key <= year_param) |>
-    select(year_key, fiscal_year) |>
-    as.data.table()
-  
-  years[, Index := row_number()]
-  
-  submissions <-
-    tbl(db, 'submissions') |>
-    mutate(parent_id = ifelse(prch_f %in% c('1', '2', '3'), idx_f, unitid)) |>
-    select(unitid, year_key, parent_id) |>
-    collect()
-  
-  institutions <- 
-    tbl(db, 'directory') |>
-    filter(level_institution == 1,
-           bea_region < 9,
-           bea_region > 0,
-           title4_eligible == 1,
-           degree_granting == 1)
-    
-  total_enrollment <-
-    tbl(db, 'fall_enrollment') |>
-    filter(year_key > year_param - 8,
-           year_key <= year_param,
-           career_level == 'Undergraduate',
-           degree_seeking == 'Degree-seeking',
-           continuation_type == 'First-time') |>
-    group_by(unitid, year_key) |>
-    summarize(`UG First-time First Year Enrollment` = sum(headcount, na.rm = TRUE)) |>
-    collect() |>
-    inner_join(submissions, by = c('unitid', 'year_key')) |>
-    group_by(parent_id, year_key) |>
-    summarize(`UG First-time First Year Enrollment` = sum(`UG First-time First Year Enrollment`, na.rm = TRUE)) |>
-    rename(unitid = parent_id)
-  
-  enrollment_by_state <-
-    tbl(db, 'enrollment_by_state') |>
-    inner_join(institutions, by = c('unitid', 'year_key')) |>
-    mutate(`In State Enrollment` = ifelse(fips.x == fips.y, headcount, 0),
-           `Out of State Enrollment` = ifelse(!fips.x == fips.y, headcount, 0)) |>
-    group_by(unitid, year_key) |>
-    summarize(`In State Enrollment` = sum(`In State Enrollment`, na.rm = TRUE),
-              `Out of State Enrollment` = sum(`Out of State Enrollment`, na.rm = TRUE)) |>
-    collect() |>
-    inner_join(submissions, by = c('unitid', 'year_key')) |>
-    group_by(parent_id, year_key) |>
-    summarize(`In State Enrollment` = sum(`In State Enrollment`, na.rm = TRUE),
-              `Out of State Enrollment` = sum(`Out of State Enrollment`, na.rm = TRUE)) |>
-    rename(unitid = parent_id)
-  
-  retention <-
-    tbl(db, 'retention') |>
-    filter(year_key > year_param - 8,
-           year_key <= year_param,
-           retention_ft > 0) |>
-    select(unitid,
-           year_key,
-           Retention = retention_ft) |>
-    collect() |>
-    inner_join(submissions, by = c('unitid', 'year_key')) |>
-    group_by(parent_id, year_key) |>
-    summarize(Retention = mean(Retention, na.rm = TRUE)) |>
-    rename(unitid = parent_id)
-  
-  academic_year_charges <-
-    tbl(db, 'academic_year_charges') |>
-    filter(year_key > year_param - 8,
-           year_key <= year_param,
-           field %in% c('tuition2', 'tuition3')) |>
-    collect() |>
-    pivot_wider(names_from = field,
-                values_from = value) |>
-    rename(`In State Tuition` = tuition2,
-           `Out of State Tuition` = tuition3) |>
-    inner_join(submissions, by = c('unitid', 'year_key')) |>
-    group_by(parent_id, year_key) |>
-    summarize(`In State Tuition` = mean(`In State Tuition`, na.rm = TRUE),
-              `Out of State Tuition` = mean(`Out of State Tuition`, na.rm = TRUE)) |>
-    rename(unitid = parent_id)
-  
-  student_financial_aid <-
-    tbl(db, 'student_financial_aid') |>
-    filter(year_key > year_param - 8,
-           year_key <= year_param,
-           field == 'igrnt_t') |>
-    collect() |>
-    pivot_wider(names_from = field,
-                values_from = value) |>
-    inner_join(submissions, by = c('unitid', 'year_key')) |>
-    group_by(parent_id, year_key) |>
-    summarize(igrnt_t = sum(igrnt_t, na.rm = TRUE)) |>
-    rename(unitid = parent_id,
-           `Inst Grant Aid` = igrnt_t)
-    
-  finance <-
-    tbl(db, 'finance') |>
-    filter(year_key > year_param - 8,
-           year_key <= year_param,
-           field %in% c('f1b11', 'f1h02', 'f1c191', 'f1c121',
-                        'f2d03', 'f2h02', 'f2e131', 'f2e091')) |>
-    collect() |>
-    mutate(field = recode(field,
-                          'f1b11' = 'State Appropriations',
-                          'f1h02' = 'Endowment EOY',
-                          'f1c191' = 'Total Expenses',
-                          'f1c121' = 'Hospital Expenses',
-                          'f2d03' = 'State Appropriations',
-                          'f2h02' = 'Endowment EOY',
-                          'f2e131' = 'Total Expenses',
-                          'f2e091' = 'Hospital Expenses')) |>
-    pivot_wider(names_from = field,
-                values_from = amount)
-    
-  institutions <-
-    institutions |>
-    inner_join(ic, by = c('unitid', 'year_key')) |>
-    group_by(unitid) |>
-    summarize(year_key = max(year_key)) |>
-    ungroup() |>
-    inner_join(institutions, by = c('unitid', 'year_key')) |>
-    mutate(close_year = ifelse(as.integer(close_year) > 0, close_year, NA)) |>
-    select(unitid,
-           `Institution Name` = institution_name,
-           City = city,
-           State = state,
-           FIPS = fips,
-           Control = control,
-           `Close Year` = close_year,
-           longitude,
-           latitude) |>
-    collect()
-    
-  gdp <-
-    tbl(db, 'gdp') |>
-    filter(year_key > year_param - 8,
-           year_key <= year_param,
-           month == 4) |>
-    select(year_key, gdp) |>
-    collect() |>
-    inner_join(years, by = 'year_key')
-  
-  # Disconnect database
-  dbDisconnect(db)
-  rm(db)
-})
+years <- readRDS('data/ipeds_years.rds')[
+  year_key > params$year - 8 & year_key <= params$year,
+  .(year_key,
+    fiscal_year,
+    Index = .I)]
+setkey(years, year_key)
+
+ic <- readRDS('data/characteristics.rds')[distnced == 0 & ft_ug == 1,
+                                          .(unitid, year_key)]
+
+institutions <- readRDS('data/directory.rds')[level_institution == 1 &
+                                                bea_region < 9 &
+                                                bea_region > 0 &
+                                                title4_eligible == 1 &
+                                                degree_granting == 1]
+
+institutions <- institutions[year_key == max(year_key), by = unitid]
+
+institutions <- merge.data.table(
+  x = institutions,
+  y = ic,
+  by = c('unitid', 'year_key')
+  )
+
+institutions <- institutions[
+  ,
+  .(unitid,
+    `Institution Name` = institution_name,
+    City = city,
+    State = state,
+    fips,
+    Control = recode(control,
+                     `1` = 'Public',
+                     `2` = 'Private',
+                     `3` = 'For-profit',
+                     .default = 'Unknown',
+                     .missing = 'Unknown'),
+    `Close Year` = ifelse(as.integer(close_year) > 0, close_year, NA),
+    Longitude = longitude,
+    Latitude = latitude)]
+
+rm(ic)
+
+submissions <- merge.data.table(
+  x = readRDS('data/submissions.rds'),
+  y = years[, .(year_key)],
+  by = 'year_key')
+
+submissions <- submissions[
+  ,
+  .(unitid,
+    year_key,
+    parent_id = ifelse(prch_f %in% c('1', '2', '3'), idx_f, unitid))]
+
+total_enrollment <- merge.data.table(
+  x = readRDS('data/fall_enrollment.rds')[
+    year_key > params$year - 8 &
+      year_key <= params$year &
+      career_level == 'Undergraduate' &
+      degree_seeking == 'Degree-seeking' &
+      continuation_type == 'First-time'],
+  y = years[, .(year_key)],
+  by = 'year_key')
+
+total_enrollment <- merge.data.table(
+  x = total_enrollment,
+  y = submissions,
+  by = c('unitid', 'year_key')
+  )
+
+total_enrollment <- total_enrollment[
+  ,
+  .(`UG First-time First Year Enrollment` = sum(headcount, na.rm = T)),
+  by = .(unitid = parent_id, year_key)]
+
+enrollment_by_state <- merge.data.table(
+  x = readRDS('data/enrollment_by_state.rds'),
+  y = years[, .(year_key)],
+  by = 'year_key')
+
+enrollment_by_state <- merge.data.table(
+  x = enrollment_by_state,
+  y = institutions,
+  by = c('unitid')
+  )
+
+enrollment_by_state <- merge.data.table(
+  x = enrollment_by_state,
+  y = submissions,
+  by = c('unitid', 'year_key')
+  )
+
+enrollment_by_state <- enrollment_by_state[
+  ,
+  .(`In State Enrollment` = sum((fips.x == fips.y) * headcount, na.rm = T),
+    `Out of State Enrollment` = sum((fips.x != fips.y) * headcount, na.rm = T)),
+  by = .(unitid = parent_id, year_key)]
+
+retention <- merge.data.table(
+  x = readRDS('data/retention.rds')[retention_ft > 0],
+  y = years[, .(year_key)],
+  by = 'year_key')
+
+retention <- retention[
+  ,
+  .(unitid,
+    year_key,
+    Retention = retention_ft)
+  ]
+
+retention <- merge.data.table(
+  x = retention,
+  y = submissions,
+  by = c('unitid', 'year_key')
+  )
+
+retention <- retention[
+  ,
+  .(Retention = mean(Retention, na.rm = TRUE)),
+  by = .(unitid = parent_id, year_key)]
+
+academic_year_charges <- merge.data.table(
+  x = readRDS('data/academic_year_charges.rds')[
+    field %in% c('tuition2', 'tuition3')],
+  y = years[, .(year_key)],
+  by = 'year_key')
+
+academic_year_charges <- dcast(
+  academic_year_charges,
+  unitid + year_key ~ field,
+  value.var = 'value'
+  )
+
+academic_year_charges <- merge.data.table(
+  x = academic_year_charges,
+  y = submissions,
+  by = c('unitid', 'year_key')
+  )
+
+academic_year_charges <- academic_year_charges[
+  ,
+  .(`In State Tuition` = mean(tuition2, na.rm = TRUE),
+    `Out of State Tuition` = mean(tuition3, na.rm = TRUE)),
+  by = .(unitid = parent_id, year_key)]
+
+student_financial_aid <- merge.data.table(
+  x = readRDS('data/student_financial_aid.rds')[field == 'igrnt_t'],
+  y = years[, .(year_key)],
+  by = 'year_key')
+
+student_financial_aid <- merge.data.table(
+  x = student_financial_aid,
+  y = submissions,
+  by = c('unitid', 'year_key')
+  )
+
+student_financial_aid <- student_financial_aid[
+  ,
+  .(`Inst Grant Aid` = sum(value, na.rm = TRUE)),
+  by = .(unitid = parent_id, year_key)]
+
+rm(submissions)
+
+finance <- merge.data.table(
+  x = readRDS('data/finance.rds')[
+    field %in% c('f1b11', 'f1h02', 'f1c191', 'f1c121',
+                 'f2d03', 'f2h02', 'f2e131', 'f2e091')],
+  y = years[, .(year_key)],
+  by = 'year_key')
+
+finance[,
+        field := recode(field,
+                        'f1b11' = 'State Appropriations',
+                        'f1h02' = 'Endowment EOY',
+                        'f1c191' = 'Total Expenses',
+                        'f1c121' = 'Hospital Expenses',
+                        'f2d03' = 'State Appropriations',
+                        'f2h02' = 'Endowment EOY',
+                        'f2e131' = 'Total Expenses',
+                        'f2e091' = 'Hospital Expenses')]
+
+finance <- dcast(
+  finance,
+  unitid + year_key + accounting_standard ~ field,
+  value.var = 'amount')
+
+gdp <- merge.data.table(
+  x = readRDS('data/gdp.rds')[
+    month == 4,
+    .(year_key, gdp)],
+  y = years,
+  by = 'year_key')
+
+rm(years)
 ```
 
 ## Merge Data Frames
 
 ```{r}
-system.time({
-  df <-
-    institutions |>
-    inner_join(submissions, by = 'unitid') |>
-    inner_join(gdp, by = 'year_key') |>
-    inner_join(retention, by = c('unitid', 'year_key')) |>
-    inner_join(total_enrollment, by = c('unitid', 'year_key')) |>
-    inner_join(student_financial_aid, by = c('unitid', 'year_key')) |>
-    inner_join(academic_year_charges, by = c('unitid', 'year_key')) |>
-    inner_join(finance, by = c('unitid', 'year_key')) |>
-    left_join(enrollment_by_state, by = c('unitid', 'year_key')) |>
-    add_count(unitid) |>
-    filter(n == 8) |>
-    select(-n) |>
-    mutate(Control = recode(Control,
-                            `1` = 'Public',
-                            `2` = 'Private',
-                            `3` = 'For-profit',
-                            .default = 'Unknown')) |>
-    rename(Unitid = unitid,
-           `Accounting Standard` = accounting_standard,
-           Longitude = longitude,
-           Latitude = latitude,
-           `Fiscal Year` = fiscal_year,
-           GDP = gdp)
-  
-  # housekeeping
-  rm(submissions,
-     gdp,
-     retention,
-     total_enrollment,
-     student_financial_aid,
-     academic_year_charges,
-     finance,
-     enrollment_by_state,
-     ic,
-     ipeds_years,
-     institutions)
-})
+setkey(gdp, year_key)
+setkey(total_enrollment, year_key)
+df <- total_enrollment[gdp, nomatch = NULL]
+
+setkey(df, unitid, year_key)
+setkey(enrollment_by_state, unitid, year_key)
+df <- enrollment_by_state[df]
+
+setkey(retention, unitid, year_key)
+df <- retention[df]
+
+setkey(student_financial_aid, unitid, year_key)
+df <- student_financial_aid[df]
+
+setkey(academic_year_charges, unitid, year_key)
+df <- academic_year_charges[df]
+
+setkey(finance, unitid, year_key)
+df <- finance[df]
+
+setkey(institutions, unitid)
+setkey(df, unitid)
+df <- institutions[df, nomatch = NULL]
+
+
+df <- df[df[, .N, by = unitid][N == 8], on = .(unitid)]
+df <- rename(df,
+             `Fiscal Year` = fiscal_year,
+             `Accounting Standard` = accounting_standard,
+             GDP = gdp)
+
+# apply GDP deflators
+dollar_vars <- c('Total Expenses',
+                 'Hospital Expenses',
+                 'Endowment EOY',
+                 'Inst Grant Aid',
+                 'In State Tuition',
+                 'Out of State Tuition',
+                 'State Appropriations')
+df[, (dollar_vars) := lapply(.SD, function(x) x / GDP), .SDcols = dollar_vars]
+
+# housekeeping
+rm(gdp,
+   retention,
+   total_enrollment,
+   student_financial_aid,
+   academic_year_charges,
+   finance,
+   enrollment_by_state,
+   ipeds_years,
+   institutions)
+
+df
 ```
 
-## Apply Deflators
+## Impute for Missing Variables
 
 ```{r}
-system.time({
-  adjusted <-
-    df |>
-    mutate(`Total Expenses` = `Total Expenses` / GDP,
-           `Hospital Expenses` = `Hospital Expenses` / GDP,
-           `Endowment EOY` = `Endowment EOY` / GDP,
-           `Inst Grant Aid` = `Inst Grant Aid` / GDP,
-           `In State Tuition` = `In State Tuition` / GDP,
-           `Out of State Tuition` = `Out of State Tuition` / GDP,
-           `State Appropriations` = `State Appropriations` / GDP)
-})
-```
+metric_vars <- c('In State Enrollment',
+                 'Out of State Enrollment',
+                 dollar_vars)
 
-## Imputations
-
-```{r}
-system.time({
-  imputed <-
-    adjusted |>
-    group_by(Unitid) |>
-    mutate(Retention = ifelse(is.na(Retention), median(Retention, na.rm = TRUE), Retention),
-           `In State Enrollment` = ifelse(is.na(`In State Enrollment`),
-                                          median(`In State Enrollment`,
-                                                 na.rm = TRUE),
-                                          `In State Enrollment`),
-           `Out of State Enrollment` = ifelse(is.na(`Out of State Enrollment`),
-                                              median(`Out of State Enrollment`,
-                                                     na.rm = TRUE),
-                                              `Out of State Enrollment`),
-           `Total Expenses` = ifelse(is.na(`Total Expenses`),
-                                     median(`Total Expenses`,
-                                            na.rm = TRUE),
-                                     `Total Expenses`),
-           `Hospital Expenses` = ifelse(is.na(`Hospital Expenses`),
-                                     median(`Hospital Expenses`,
-                                            na.rm = TRUE),
-                                     `Hospital Expenses`),
-           `Endowment EOY` = ifelse(is.na(`Endowment EOY`),
-                                     median(`Endowment EOY`,
-                                            na.rm = TRUE),
-                                     `Endowment EOY`),
-           `Inst Grant Aid` = ifelse(is.na(`Inst Grant Aid`),
-                                     median(`Inst Grant Aid`,
-                                            na.rm = TRUE),
-                                     `Inst Grant Aid`),
-           `In State Tuition` = ifelse(is.na(`In State Tuition`),
-                                     median(`In State Tuition`,
-                                            na.rm = TRUE),
-                                     `In State Tuition`),
-           `Out of State Tuition` = ifelse(is.na(`Out of State Tuition`),
-                                     median(`Out of State Tuition`,
-                                            na.rm = TRUE),
-                                     `Out of State Tuition`),
-           `State Appropriations` = ifelse(is.na(`State Appropriations`),
-                                     median(`State Appropriations`,
-                                            na.rm = TRUE),
-                                     `State Appropriations`)) |>
-    ungroup()
-})
+df <- df[,
+         (metric_vars) := lapply(.SD,
+                                 function(x) fcoalesce(x,
+                                                       median(x, na.rm = T))),
+         by = unitid,
+         .SDcols = metric_vars]
 ```
 
 ## Create Base Metrics
@@ -387,36 +382,37 @@ Because EF-C is optional in odd-numbered years, there were a considerable number
 * _Market Price_ = In State Tuition times Proportion of In State Enrollment plus Out of State Tution time Proportion of Out of State Enrollment Less Institutional Grant Aid
 
 ```{r}
-system.time({
-  metrics <-
-    imputed |>
-    add_count(Unitid) |>
-    filter(n == 8) |>
-    mutate(`Total Enrollment` = `In State Enrollment` + `Out of State Enrollment`,
-           `In State Enrollment Pct` = `In State Enrollment` / `Total Enrollment`,
-           `Out of State Enrollment Pct` = `Out of State Enrollment` / `Total Enrollment`,
-           `Endowment/Expenses` = `Endowment EOY` / (`Total Expenses` - `Hospital Expenses`),
-           `Average Grant Aid` = `Inst Grant Aid` / `UG First-time First Year Enrollment`,
-           `Market Price` = (`In State Tuition` * `In State Enrollment Pct` + `Out of State Tuition` * `Out of State Enrollment Pct`) - `Average Grant Aid`) |>
-    select(-c(n, `Total Enrollment`))
-})
+df[, `Total Enrollment` := `In State Enrollment` + `Out of State Enrollment`]
+df[,
+   `:=`(`In State Enrollment Pct` = `In State Enrollment` / `Total Enrollment`,
+        `Out of State Enrollment Pct` = `Out of State Enrollment` / `Total Enrollment`)]
+df[
+  ,
+  `:=`(`Endowment/Expenses` = `Endowment EOY` / (`Total Expenses` - `Hospital Expenses`),
+       `Average Grant Aid` = `Inst Grant Aid` / `UG First-time First Year Enrollment`)]
+
+df[
+  ,
+  `Market Price` := (`In State Tuition` * `In State Enrollment Pct` + `Out of State Tuition` * `Out of State Enrollment Pct`) - `Average Grant Aid`]
+
+df
 ```
 
 ## Output Metrics Files
 
 ```{r}
 system.time({
-  metrics |>
+  df |>
     write_csv('data/metrics.csv',
               na = '')
-  saveRDS(metrics, 'data/metrics.rds')
+  saveRDS(df, 'data/metrics.rds')
 })
 ```
 
 ## Inspect Institutions With Unusual Market Price
 
 ```{r}
-metrics |>
+df |>
   filter(`Market Price` <= 0)
 ```
 
@@ -431,8 +427,8 @@ The authors create a linear function for each institution and use this to projec
 system.time({
   coef_helper <- function(td) as_tibble(t(deframe(td)))
   models <-
-    metrics |>
-    select(Unitid,
+    df |>
+    select(unitid,
            Control,
            Index,
            `UG First-time First Year Enrollment`,
@@ -444,7 +440,7 @@ system.time({
     pivot_longer(cols = 4:8,
                  names_to = 'Metric',
                  values_to = 'Value') |>
-    group_by(Unitid, Control, Metric) |>
+    group_by(unitid, Control, Metric) |>
     nest() |>
     mutate(model = map2('Value ~ Index', data, run_model),
            td = map(model, tidy),
@@ -460,7 +456,7 @@ Using the estimated coefficients, project the value three years from the most re
 system.time({
   projections <-
     models |>
-    select(Unitid,
+    select(unitid,
            Control,
            Metric,
            coef) |>
@@ -468,7 +464,7 @@ system.time({
     rename(Slope = Index) |>
     mutate(Index = 11,
            Value = `(Intercept)` + Slope * Index) |>
-    select(Unitid,
+    select(unitid,
            Control,
            Index,
            Metric,
@@ -520,12 +516,12 @@ system.time({
             'Market Price', 'Private', -0.104,  -0.175)
   
   institution_header <-
-    metrics |>
-    distinct(Unitid,
+    df |>
+    distinct(unitid,
              `Institution Name`,
              City,
              State,
-             FIPS,
+             fips,
              Control,
              `Accounting Standard`,
              `Close Year`,
@@ -539,8 +535,8 @@ system.time({
 ```{r}
 system.time({
   change_scores <-
-    metrics |>
-    select(Unitid,
+    df |>
+    select(unitid,
            Control,
            Index,
            `UG First-time First Year Enrollment`,
@@ -552,8 +548,8 @@ system.time({
     pivot_longer(cols = 4:8,
                  names_to = 'Metric',
                  values_to = 'Value') |>
-    arrange(Unitid, Control, Metric, Index) |>
-    group_by(Unitid, Control, Metric) |>
+    arrange(unitid, Control, Metric, Index) |>
+    group_by(unitid, Control, Metric) |>
     mutate(Change = ifelse(Index == 8,
                            (Value - lag(Value, 7)) / lag(Value, 7),
                            (Value - lag(Value, 8)) / lag(Value, 8))
@@ -570,7 +566,7 @@ system.time({
 system.time({
   warning_scores <-
     change_scores |>
-    count(Unitid, Control, Metric) |>
+    count(unitid, Control, Metric) |>
     inner_join(change_scores) |>
     filter(n == 2) |>
     inner_join(criteria) |>
@@ -595,30 +591,73 @@ system.time({
                  values_to = 'Value') |>
     mutate(Value = ifelse(Control == 'Public' & Metric == 'Endowment/Expenses', 0, Value),
            Value = ifelse(Control == 'Private' & Metric == 'State Appropriations', 0, Value)) |>
-    group_by(Unitid) |>
+    group_by(unitid) |>
     summarize(`Stress Score` = sum(Value)) |>
     ungroup() |>
     mutate(`Stress Score Pct` = `Stress Score` / 12) |>
-    inner_join(warning_scores, ., by = 'Unitid') |>
+    inner_join(warning_scores, ., by = 'unitid') |>
     mutate(Type = recode(Index,
                          `8` = 'Actual',
                          `11` = 'Projected')) |>
     select(-Index) |>
     pivot_wider(names_from = c(Metric, Type),
                 values_from = c(Change, Alert, Warning)) |>
-    inner_join(institution_header, ., by = c('Unitid', 'Control'))
+    inner_join(institution_header, ., by = c('unitid', 'Control'))
 })
 ```
 
 ## Output Stress Scores File
 
 ```{r}
-system.time({
-  stress_scores |>
-    write_csv('data/stress.csv',
-              na = '')
-  saveRDS(stress_scores, 'data/stress.rds')
+stress_scores |>
+  write_csv('data/stress.csv',
+            na = '')
+saveRDS(stress_scores, 'data/stress.rds')
+
+class(stress_scores$`Stress Score Pct`) <- 'percentage'
+class(df$Retention) <- 'percentage'
+class(df$`In State Enrollment Pct`) <- 'percentage'
+class(df$`Out of State Enrollment Pct`) <- 'percentage'
+class(df$GDP) <- 'comma'
+
+wb <- createWorkbook()
+
+options("openxlsx.numFmt" = "#,##0")
+options("openxlsx.na.string" = "_")
+
+# write metric data
+sheet_name <- 'Inst Metrics By Year'
+addWorksheet(wb, sheet_name)
+
+writeDataTable(wb,
+               sheet_name,
+               df,
+               startRow = 1,
+               startCol = 1,
+               tableStyle = "TableStyleMedium2")
+# write stress data
+sheet_name <- "Stress Scores"
+addWorksheet(wb, sheet_name)
+writeDataTable(wb,
+               sheet_name,
+               stress_scores,
+               startRow = 1,
+               startCol = 1,
+               tableStyle = "TableStyleMedium2")
+
+timer <- system.time({
+  return <- saveWorkbook(wb,
+                         file = "data/institutional_metrics.xlsx",
+                         overwrite = TRUE,
+                         returnValue = T) == T
 })
+
+if (return == T) {
+  print("File written.  System timings:")
+  print(timer)
+} else {
+  print('Failed to write.') }
+
 ```
 
 # Plots
@@ -626,10 +665,10 @@ system.time({
 ## Endowment/Expenses vs Market Price
 
 ```{r}
-metrics |>
+df |>
   ggplot(aes(x = `Endowment/Expenses`, y = `Market Price`, color = Control)) +
     geom_point(alpha = 1/5) + # geom_hex(bins = 40) +
-    facet_wrap(facets = vars(Control), nrow = 2, ncol = 1) +
+    facet_wrap(facets = vars(Control), nrow = 3, ncol = 1) +
     labs(title = 'Endowment-to-Expenses vs. Market Price',
          x = 'Endowment/Expenses',
          y = 'Market Price')
@@ -638,10 +677,10 @@ metrics |>
 ## State Appropriations vs Market Price
 
 ```{r}
-metrics |>
+df |>
   ggplot(aes(x = `State Appropriations`, y = `Market Price`, color = Control)) +
     geom_point(alpha = 1/5) + # geom_hex(bins = 40) +
-    facet_wrap(facets = vars(Control), nrow = 2, ncol = 1) +
+    facet_wrap(facets = vars(Control), nrow = 3, ncol = 1) +
     labs(title = 'State Appropriations vs. Market Price',
          x = 'State Appropriations',
          y = 'Market Price')
