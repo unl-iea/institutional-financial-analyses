@@ -1,0 +1,258 @@
+---
+title: "IPEDS Financial Metrics"
+author: "Jason P. Casey"
+format:
+  revealjs:
+    self-contained: true
+    footer: "[Institutional Effectiveness and Analytics](https://iea.unl.edu);"
+    logo: Nebraska_N_RGB.png
+    scrollable: true
+    theme: custom.scss
+    preview-links: auto
+    slide-number: c/t
+execute: 
+  echo: false
+editor: source
+---
+
+```{r setup}
+#| label: load-packages
+#| include: false
+library(purrr, warn.conflicts = F)
+library(glue, warn.conflicts = F)
+library(janitor, warn.conflicts = F)
+library(lubridate, warn.conflicts = F)
+library(ggbeeswarm, warn.conflicts = F)
+library(knitr, warn.conflicts = F)
+library(kableExtra, warn.conflicts = F)
+library(formattable, warn.conflicts = F)
+library(data.table, warn.conflicts = F)
+library(tidyverse, warn.conflicts = F)
+
+options(knitr.kable.NA = '')
+options(tidyverse.quiet = TRUE)
+options(dplyr.summarise.inform = FALSE)
+
+# set random seed
+set.seed(1965)
+```
+
+
+```{r}
+#| label: local-functions
+#| include: false
+
+# create year keys for fetching data
+fetch_years <- function(window_years = 10) {
+# set constants
+  last_year <- ifelse(month(today()) > 9,
+                        year(today()) - 1,
+                        year(today()) - 2)
+  
+  # base tibble used for all data pulls
+  # because the window includes the final year, it must be offset by one
+  years <- data.table(year_key = seq(last_year - window_years + 1, last_year))
+  years[, `Fiscal Year` := paste(year_key - 1, year_key, sep = '-')]
+  return(years)
+}
+
+
+fetch_gdp <- function(years) {
+  gdp <-
+    fread('https://fred.stlouisfed.org/graph/fredgraph.csv?id=GDPDEF',
+          colClasses = 'character',
+          strip.white = T) |>
+    clean_names()
+  
+  gdp[, date := as_date(date)]
+  
+  gdp[month(date) == 4,
+      .(year_key = ifelse(month(date) > 6, year(date) + 1, year(date)),
+        gdp = as.double(gdpdef) / 100)][year_key %in% years]
+}
+
+table_me <- function(df) {
+  df |>
+    kbl() |>
+    kable_paper(c('condensed', 'hover'), full_width = F, position = 'center')
+}
+
+# include user functions
+source(file = "user_functions.R")
+
+unnest_dt <- function(dt, col, id = list(year_key)){
+  stopifnot(is.data.table(dt))
+  
+  by <- substitute(id)
+  col <- substitute(unlist(col, recursive = F))
+  
+  dt[, eval(col), by = eval(by)]
+}
+
+fetch_hd <- function(year_key) {
+  inst <- load_hd(year_key)[iclevel == 1 & obereg < 9 & opeflag == 1 &
+                              deggrant == 1 & act == 'A' & control %in% 1:2]
+  ic <- load_ic(year_key)[distnced == 2 & ft_ug == 1, .(unitid)]
+  setkey(inst, unitid)
+  setkey(ic, unitid)
+  ic[inst, nomatch = NULL][,
+           .(unitid, institution_name = instnm,  state = stabbr, fips,
+             longitude = longitud, latitude)]
+}
+
+fetch_fall_enrollment <- function(year_key) {
+  load_fall_enrollment(year_key)
+}
+
+fetch_student_aid <- function(year_key) {
+  df <- load_sfa(year_key)[field %in% c('agrnt_t', 'igrnt_t', 'igrnt_p',
+                                        'loan_p', 'loan_a', 'pgrnt_p')]
+  df <- dcast(df,
+              unitid ~ field,
+              value.var = 'value')
+  
+  df[, .(unitid,
+         total_grant_aid = as.integer(agrnt_t),
+         inst_grant_aid = as.integer(igrnt_t),
+         pct_inst_grant_aided = igrnt_p / 100,
+         pct_pell_aided = pgrnt_p / 100,
+         total_loan_amount = as.integer(loan_a),
+         pct_with_loans = loan_p/ 100)]
+}
+
+fetch_submissions <- function(year_key) {
+  load_submissions(year_key)[
+    ,
+    .(unitid,
+      parent_id = ifelse(prch_f %in% c('1', '2', '3'), idx_f, unitid))]
+}
+
+fetch_retention <- function(year_key) {
+  df <- load_retention(year_key)
+  df[, .(unitid,
+         ft_retention_rate = ret_pcf / 100,
+         pt_retention_rate = ret_pcp / 100)]
+}
+
+fetch_charges <- function(year_key) {
+  df <- load_charges(year_key)[field %in% c('tuition2', 'tuition3')]
+  df <- dcast(df,
+              unitid ~ field,
+              value.var = 'value')
+  df[,
+     .(unitid,
+       in_state_tuition = tuition2,
+       out_of_state_tuition = tuition3)]
+}
+
+fetch_finance <- function(year_key) {
+  fasb <- load_fasb(year_key)[
+    field %in% c('f2b01', 'f2b02', 'f2d01', 'f2a03a', 'f2a17', 'f2a18', 'f2c05',
+                 'f2c06', 'f2c08', 'f2c10',  'f2d01', 'f2e135', 'f2h02'),
+    accounting_standard := 'FASB']
+  
+  fasb[, field := recode(field,
+                         'f2b01' = 'Total Revenues',
+                         'f2b02' = 'Total Expenses',
+                         'f2a03a' = 'Total Debt',
+                         'f2a17' = 'Total Plant',
+                         'f2a18' = 'Accumulated Depreciation',
+                         'f2c05' = 'Institutional Grants (Funded)',
+                         'f2c06' = 'Institutional Grants (Unfunded)',
+                         'f2c08' = 'Allowances to Tuition and Fees',
+                         'f2c10' = 'Total Discounts',
+                         'f2d01' = 'Tuition Revenue',
+                         'f2e135' = 'Depreciation Expense',
+                         'f2h02' = 'Endowment EOY')]
+  
+  gasb <- load_gasb(year_key)[
+    field %in% c('f1d01', 'f1d02', 'f1a07', 'f1a27t4', 'f1a284', 'f1e05',
+                 'f1e06', 'f1e08', 'f1e10', 'f1b01', 'f1c19dp', 'f1h02',
+                 'f1b09'),
+    accounting_standard := 'GASB']
+  gasb[, field := recode(field,
+                         'f1d01' = 'Total Revenues',
+                         'f1d02' = 'Total Expenses',
+                         'f1a07' = 'Total Debt',
+                         'f1a27t4' = 'Total Plant',
+                         'f1a284' = 'Accumulated Depreciation',
+                         'f1e05' = 'Institutional Grants (Funded)',
+                         'f1e06' = 'Institutional Grants (Unfunded)',
+                         'f1e08' = 'Allowances to Tuition and Fees',
+                         'f1e10' = 'Total Discounts',
+                         'f1b01' = 'Tuition Revenue',
+                         'f1c19dp' = 'Depreciation Expense',
+                         'f1h02' = 'Endowment EOY')]
+  df <- funion(fasb, gasb)
+
+  dcast(df,
+        unitid + accounting_standard ~ field,
+        value.var = 'amount')
+}
+```
+
+## Data Sources
+
+The underlying data for this presentation comes from various public sources:
+
+- *GDP*: Gross Domestic Product from the Federal Reserve
+- *Fall Enrollment*: IPEDS Fall Enrollment (EF) Survey, Part A
+- *Fall Enrollment by State*: IPEDS Fall Enrollment (EF) Survey, Part C
+_ *First-year Retention*: IPEDS Fall Enrollment (EF) Survey, Part D
+
+```{r}
+#| label: load-general-data
+#| include: false
+
+# EF headcount FTE weights
+# see 'Calculation of FTE students (using fall student heacounts) in
+#    https://surveys.nces.ed.gov/ipeds/VisGlossaryAll.aspx
+weights <- data.table(time_status = rep(c('Full-time', 'Part-time'),
+                                        times = 1, each = 24),
+                      career_level = rep(c('Undergraduate', 'Graduate'),
+                                         times = 6, each = 4),
+                      Control = rep(c('Public', 'Private', 'For-profit'),
+                                    times = 2, each = 8),
+                      Level = c(1, 2, 3, -3),
+                      weight = c(rep(1, 24),
+                                 c(0.403543, 0.335737, 0.335737, 0.382059,
+                                   0.361702, 0.335737, 0.335737, 0.335737,
+                                   0.392857, 0.335737, 0.335737, 0.335737,
+                                   0.382059, 0.335737, 0.335737, 0.335737,
+                                   0.392857, 0.335737, 0.335737, 0.335737,
+                                   0.382059, 0.335737, 0.335737, 0.335737))
+                      )
+years <- fetch_years(10)
+gdp <- fetch_gdp(years$year_key)
+institutions <- copy(years)[, data := map(year_key, fetch_hd)]
+submissions <- copy(years)[, data := map(year_key, fetch_submissions)]
+# directory <- unnest_dt(directory, data, list(year_key))
+fall_enrollment <- copy(years)[, data := map(year_key, fetch_fall_enrollment)]
+student_aid <- copy(years)[, data := map(year_key, fetch_student_aid)]
+retention <- copy(years)[, data := map(year_key, fetch_retention)]
+charges <- copy(years)[, data := map(year_key, fetch_charges)]
+finance <- copy(years)[, data := map(year_key, fetch_finance)]
+```
+
+## Years Covered
+
+::: {style="font-size: 0.65em"}
+For IPEDS Survey components, fiscal years and term data (e.g., Fall Enrollment) are offset by one year in a collection cycle.  For our purposes, this offset is not much of a problem, so there has been no correction (i.e., aligning a fall term with its correct fiscal cycle).
+:::
+
+::: {style="font-size: 0.75em"}
+```{r}
+#| label: show-years
+years |>
+  mutate(`Term Data` = paste0('Fall ', year_key)) |>
+  rename(`Collection Year` = year_key) |>
+  table_me()
+```
+:::
+
+## Test
+
+```{r}
+unnest_dt(finance, data)
+```
+
