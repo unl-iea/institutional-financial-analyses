@@ -3,10 +3,9 @@ title: "IPEDS Financial Metrics"
 subtitle: "NCES Data Files"
 author: "Jason P. Casey"
 date: 2020-04-03
-output: html_notebook
-params:
-  year:
-    value: 2011
+output: 
+  html_notebook:
+    code_folding: show
 ---
 
 ```{r setup}
@@ -48,6 +47,15 @@ weights <- data.table(time_status = rep(c('Full-time', 'Part-time'),
                                    0.392857, 0.335737, 0.335737, 0.335737,
                                    0.382059, 0.335737, 0.335737, 0.335737))
                       )
+
+# set constants
+last_year <- ifelse(month(today()) > 9,
+                      year(today()) - 1,
+                      year(today()) - 2)
+
+# base tibble used for all data pulls
+years <- data.table(year_key = seq(last_year - 10, last_year))
+years[, `Fiscal Year` := paste(year_key - 1, year_key, sep = '-')]
 ```
 
 # Read Data
@@ -94,10 +102,29 @@ institutions <- institutions[
 institutions        
 ```
 
+## Year Labels
+
+Assigns fiscal and calendar years, aligning the collection cycles for IPEDS Data.
+
+```{r}
+years <- readRDS('data/ipeds_years.rds')[
+  year_key >= params$year,
+  .(year_key,
+    fiscal_year,
+    academic_year,
+    calendar_year_fall)
+  ]
+
+years
+```
+
 ### Fall Enrollment
 
 ```{r}
-submissions <- readRDS('data/submissions.rds')[year_key >= params$year]
+submissions <- merge.data.table(
+  x = readRDS('data/submissions.rds'),
+  y = years[, .(year_key)],
+  by = 'year_key')
 
 submissions <- submissions[
   ,
@@ -111,14 +138,36 @@ total_enrollment <- merge.data.table(
   by = c('unitid', 'year_key')
   )
 
-rm(submissions)
-
 total_enrollment <- total_enrollment[
   ,
   .(headcount = sum(headcount, na.rm = T)),
   by = .(unitid = parent_id, year_key, time_status, career_level)]
 
 total_enrollment
+```
+
+### Financial Aid
+
+```{r}
+student_financial_aid <- merge.data.table(
+  x = readRDS('data/student_financial_aid.rds')[field == 'igrnt_t'],
+  y = years[, .(year_key)],
+  by = 'year_key')
+
+student_financial_aid <- merge.data.table(
+  x = student_financial_aid,
+  y = submissions,
+  by = c('unitid', 'year_key')
+  )
+
+student_financial_aid <- student_financial_aid[
+  ,
+  .(`Inst Grant Aid` = sum(value, na.rm = TRUE)),
+  by = .(unitid = parent_id, year_key)]
+
+rm(submissions)
+
+student_financial_aid
 ```
 
 ### F1A and F2 Financial Data
@@ -139,68 +188,75 @@ finance <- finance[field %in% c('f2b01', 'f2b02', 'f2d01', 'f2a03a', 'f2a17',
 
 finance[, amount := fcoalesce(amount, 0)]
 finance[, amount := amount / gdp]
-
+finance[, field := recode(field,
+                          'f2b01' = 'Total Revenues',
+                          'f2b02' = 'Total Expenses',
+                          'f2a03a' = 'Total Debt',
+                          'f2a17' = 'Total Plant',
+                          'f2a18' = 'Accumulated Depreciation',
+                          'f2c05' = 'Institutional Grants (Funded)',
+                          'f2c06' = 'Institutional Grants (Unfunded)',
+                          'f2c08' = 'Allowances to Tuition and Fees',
+                          'f2c10' = 'Total Discounts',
+                          'f2d01' = 'Tuition Revenue',
+                          'f2e135' = 'Depreciation Expense',
+                          'f2h02' = 'Endowment EOY',
+                          'f1d01' = 'Total Revenues',
+                          'f1d02' = 'Total Expenses',
+                          'f1a07' = 'Total Debt',
+                          'f1a27t4' = 'Total Plant',
+                          'f1a284' = 'Accumulated Depreciation',
+                          'f1e05' = 'Institutional Grants (Funded)',
+                          'f1e06' = 'Institutional Grants (Unfunded)',
+                          'f1e08' = 'Allowances to Tuition and Fees',
+                          'f1e10' = 'Total Discounts',
+                          'f1b01' = 'Tuition Revenue',
+                          'f1c19dp' = 'Depreciation Expense',
+                          'f1h02' = 'Endowment EOY')]
 finance <- dcast(
   finance,
   unitid + year_key + accounting_standard ~ field,
-  value.var = 'amount',
-  fill = 0)
+  value.var = 'amount')
 
-gasb <- finance[
-  accounting_standard == 'GASB',
-  .(unitid,
-    year_key,
-    accounting_standard,
-    `Total Revenues` = f1b09,
-    `Total Expenses` = f1d02,
-    `Total Debt` = f1a07,
-    `Total Plant` = f1a27t4,
-    `Accumulated Depreciation` = f1a284,
-    `Institutional Grants (Funded)` = f1e05,
-    `Institutional Grants (Unfunded)` = f1e06,
-    `Allowances to Tuition and Fees` = f1e08,
-    `Total Discounts` = f1e10,
-    `Tuition Revenue` = f1b01,
-    `Depreciation Expense` = f1c19dp,
-    `Endowment EOY` = f1h02)]
+# gasb <- finance[
+#   accounting_standard == 'GASB',
+#   .(unitid,
+#     year_key,
+#     accounting_standard,
+#     `Total Revenues` = f1b09,
+#     `Total Expenses` = f1d02,
+#     `Total Debt` = f1a07,
+#     `Total Plant` = f1a27t4,
+#     `Accumulated Depreciation` = f1a284,
+#     `Institutional Grants (Funded)` = f1e05,
+#     `Institutional Grants (Unfunded)` = f1e06,
+#     `Allowances to Tuition and Fees` = f1e08,
+#     `Total Discounts` = f1e10,
+#     `Tuition Revenue` = f1b01,
+#     `Depreciation Expense` = f1c19dp,
+#     `Endowment EOY` = f1h02)]
+# 
+# fasb <- finance[
+#   accounting_standard == 'FASB',
+#   .(unitid,
+#     year_key,
+#     accounting_standard,
+#     `Total Revenues` = f2b01,
+#     `Total Expenses` = f2b02,
+#     `Total Debt` = f2a03a,
+#     `Total Plant` = f2a17,
+#     `Accumulated Depreciation` = f2a18,
+#     `Institutional Grants (Funded)` = f2c05,
+#     `Institutional Grants (Unfunded)` = f2c06,
+#     `Allowances to Tuition and Fees` = f2c08,
+#     `Total Discounts` = f2c10,
+#     `Tuition Revenue` = f2d01,
+#     `Depreciation Expense` = f2e135,
+#     `Endowment EOY` = f2h02)]
 
-fasb <- finance[
-  accounting_standard == 'FASB',
-  .(unitid,
-    year_key,
-    accounting_standard,
-    `Total Revenues` = f2b01,
-    `Total Expenses` = f2b02,
-    `Total Debt` = f2a03a,
-    `Total Plant` = f2a17,
-    `Accumulated Depreciation` = f2a18,
-    `Institutional Grants (Funded)` = f2c05,
-    `Institutional Grants (Unfunded)` = f2c06,
-    `Allowances to Tuition and Fees` = f2c08,
-    `Total Discounts` = f2c10,
-    `Tuition Revenue` = f2d01,
-    `Depreciation Expense` = f2e135,
-    `Endowment EOY` = f2h02)]
-
-finance <- funion(gasb, fasb)
+# finance <- funion(gasb, fasb)
 
 finance[unitid == 181464]
-```
-
-## Year Labels
-
-Assigns fiscal and calendar years, aligning the collection cycles for IPEDS Data.
-
-```{r}
-years <- readRDS('data/ipeds_years.rds')[
-  ,
-  .(year_key,
-    fiscal_year,
-    academic_year,
-    calendar_year_fall)
-  ]
-
-years
 ```
 
 ## Estimate FTE from Fall Enrollment Counts
