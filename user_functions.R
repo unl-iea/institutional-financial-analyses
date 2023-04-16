@@ -39,9 +39,8 @@ open_db_connection <- function(survey_year) {
 # This uses dbplyr to fetch a specified table
 fetch_table <- function(connection, table_name) {
   tbl(connection, table_name) |>
-    collect() |>
-    clean_names() |>
-    as.data.table()
+    as.data.table() |>
+    clean_names()
 }
 
 
@@ -286,6 +285,8 @@ load_sfa <- function(year)
   }
   
   dbDisconnect(connection)
+  df_cols <- setdiff(colnames(df), 'unitid')
+  df[, (df_cols) := lapply(.SD, as.double), .SDcols = df_cols]
   melt(df,
        id.vars = 'unitid',
        measure.vars = colnames(df)[-1],
@@ -303,10 +304,13 @@ load_fasb <- function(year)
                     paste0('F', substr(year - 1, 3, 4), substr(year, 3, 4),
                            '_F2'))
   dbDisconnect(connection)
+  df_cols <- setdiff(colnames(df), 'unitid')
+  df[, (df_cols) := lapply(.SD, as.double), .SDcols = df_cols]
   melt(df,
        id.vars = 'unitid',
        measure.vars = colnames(df)[-1],
        variable.name = 'field',
+       variable.factor = F,
        value.name = 'amount',
        na.rm = T)[, amount := as.double(amount)]
 }
@@ -321,6 +325,8 @@ load_gasb <- function(year)
                     paste0('F', substr(year - 1, 3, 4), substr(year, 3, 4),
                            '_F1A'))
   dbDisconnect(connection)
+  df_cols <- setdiff(colnames(df), 'unitid')
+  df[, (df_cols) := lapply(.SD, as.double), .SDcols = df_cols]
   melt(df,
        id.vars = 'unitid',
        measure.vars = colnames(df)[-1],
