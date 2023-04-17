@@ -1,0 +1,409 @@
+---
+title: "Create Institutional Summary File"
+output: html_notebook
+---
+
+```{r setup}
+#| label: load-packages
+#| include: false
+library(purrr, warn.conflicts = F)
+library(glue, warn.conflicts = F)
+library(janitor, warn.conflicts = F)
+library(lubridate, warn.conflicts = F)
+library(ggbeeswarm, warn.conflicts = F)
+library(knitr, warn.conflicts = F)
+library(kableExtra, warn.conflicts = F)
+library(formattable, warn.conflicts = F)
+library(data.table, warn.conflicts = F)
+library(tidyverse, warn.conflicts = F)
+
+options(knitr.kable.NA = '')
+options(tidyverse.quiet = TRUE)
+options(dplyr.summarise.inform = FALSE)
+
+# set random seed
+set.seed(1965)
+
+# include user functions
+source(file = "user_functions.R")
+```
+
+# Functions
+
+```{r}
+#| label: local-functions
+#| include: false
+
+# create year keys for fetching data
+fetch_years <- function(window_years = 10) {
+# set constants
+  last_year <- ifelse(month(today()) > 9,
+                        year(today()) - 1,
+                        year(today()) - 2)
+  
+  # base tibble used for all data pulls
+  # because the window includes the final year, it must be offset by one
+  years <- data.table(year_key = seq(last_year - window_years + 1, last_year))
+  years[, `Fiscal Year` := paste(year_key - 1, year_key, sep = '-')]
+  return(years)
+}
+
+
+fetch_gdp <- function(years) {
+  gdp <-
+    fread('https://fred.stlouisfed.org/graph/fredgraph.csv?id=GDPDEF',
+          colClasses = 'character',
+          strip.white = T) |>
+    clean_names()
+  
+  gdp[, date := as_date(date)]
+  
+  gdp[month(date) == 4,
+      .(year_key = ifelse(month(date) > 6, year(date) + 1, year(date)),
+        gdp = as.double(gdpdef) / 100)][year_key %in% years]
+}
+
+unnest_dt <- function(dt, col, id = list(year_key)){
+  stopifnot(is.data.table(dt))
+  
+  by <- substitute(id)
+  col <- substitute(unlist(col, recursive = F))
+  
+  dt[, eval(col), by = eval(by)]
+}
+
+fetch_hd <- function(year_key) {
+  inst <- load_hd(year_key)[iclevel == 1 & obereg < 9 & opeflag == 1 &
+                              deggrant == 1 & act == 'A' & control %in% 1:2]
+  ic <- load_ic(year_key)[distnced == 2 & ft_ug == 1, .(unitid)]
+  setkey(inst, unitid)
+  setkey(ic, unitid)
+  ic[inst, nomatch = NULL][,
+           .(unitid, institution_name = instnm,  state = stabbr, fips, control,
+             close_date = closedat, close_year = deathyr, level = iclevel,
+             longitude = longitud, latitude)]
+}
+
+fetch_fall_enrollment <- function(year_key) {
+  melt(load_fall_enrollment(year_key),
+       id.vars = c('unitid', 'time_status', 'career_level',
+                   'degree_seeking', 'continuation_type'),
+       measure = patterns("^ef"),
+       na.rm = T,
+       variable.factor = F,
+       value.name = 'headcount')
+}
+
+
+fetch_student_aid <- function(year_key) {
+  df <- load_sfa(year_key)
+  df[field %in% c('agrnt_t', 'igrnt_t', 'igrnt_p', 'igrnt_n', 'pgrnt_n',
+                  'loan_p', 'loan_a', 'loan_n', 'pgrnt_p')]
+}
+
+fetch_submissions <- function(year_key) {
+  load_submissions(year_key)[
+    ,
+    .(unitid,
+      parent_id = ifelse(prch_f %in% c('1', '2', '3'), idx_f, unitid))]
+}
+
+fetch_retention <- function(year_key) {
+  df <- load_retention(year_key)
+  df[, .(unitid,
+         ft_retention_rate = ret_pcf / 100,
+         pt_retention_rate = ret_pcp / 100)]
+}
+
+fetch_charges <- function(year_key) {
+  df <- load_charges(year_key)[field %in% c('tuition2', 'tuition3')]
+  df <- dcast(df,
+              unitid ~ field,
+              value.var = 'value')
+  df[,
+     .(unitid,
+       in_state_tuition = tuition2,
+       out_of_state_tuition = tuition3)]
+}
+
+fetch_finance <- function(year_key) {
+  fasb <- load_fasb(year_key)
+  fasb[, amount := as.double(amount)]
+  fasb[, accounting_standard := 'FASB']
+
+  gasb <- load_gasb(year_key)
+  gasb[, amount := as.double(amount)]
+  gasb[, accounting_standard := 'GASB']
+  
+  funion(fasb, gasb)
+}
+```
+
+# Load General Data
+
+Year data, GDP, and IPEDS Submissions status.
+
+```{r}
+#| label: load-general-data
+#| include: false
+# EF headcount FTE weights
+# see 'Calculation of FTE students (using fall student heacounts) in
+#    https://surveys.nces.ed.gov/ipeds/VisGlossaryAll.aspx
+weights <- data.table(time_status = rep(c('Full-time', 'Part-time'),
+                                        times = 1, each = 24),
+                      career_level = rep(c('Undergraduate', 'Graduate'),
+                                         times = 6, each = 4),
+                      control = rep(1:3,
+                                    times = 2, each = 8),
+                      level = c(1, 2, 3, -3),
+                      weight = c(rep(1, 24),
+                                 c(0.403543, 0.335737, 0.335737, 0.382059,
+                                   0.361702, 0.335737, 0.335737, 0.335737,
+                                   0.392857, 0.335737, 0.335737, 0.335737,
+                                   0.382059, 0.335737, 0.335737, 0.335737,
+                                   0.392857, 0.335737, 0.335737, 0.335737,
+                                   0.382059, 0.335737, 0.335737, 0.335737))
+                      )
+years <- fetch_years(10)
+gdp <- fetch_gdp(years$year_key)
+submissions <- copy(years)[, data := map(year_key, fetch_submissions)]
+submissions <- unnest_dt(submissions, data, list(year_key))
+```
+
+# Institution Data
+
+```{r}
+#| label: setup-institutions
+
+institutions <- copy(years)[, data := map(year_key, fetch_hd)]
+institutions <- unnest_dt(institutions, data, list(year_key))
+institutions[close_year <= 0, close_year := NA]
+
+max_inst <- institutions[
+  ,
+  .(year_key = max(year_key),
+    closed = max(!is.na(close_year), na.rm = T)),
+  by = unitid]
+
+# retrieve last institutional record
+institutions <- merge.data.table(
+  x = max_inst,
+  y = institutions,
+  by = c('unitid', 'year_key'))
+
+institutions[, year_key := NULL]
+```
+
+# Finance Data
+
+```{r}
+#| label: setup-finance
+finance <- copy(years)[, data := map(year_key, fetch_finance)]
+finance <- unnest_dt(finance, data, list(year_key))
+
+finance <- finance[field %in% c('f2b01', 'f2b02', 'f2d01', 'f2a03a', 'f2a17',
+                                'f2a18', 'f2c05', 'f2c06', 'f2c08', 'f2c10',
+                                'f2d01', 'f2e135', 'f2h02', 'f1d01', 'f1d02',
+                                'f1a07', 'f1a27t4', 'f1a284', 'f1e05', 'f1e06',
+                                'f1e08', 'f1e10', 'f1b01', 'f1c194', 'f1c19dp', 
+                                'f1h02')]
+finance <- finance[
+  ,
+  field := recode(field,
+                  'f2b01' = 'revenues',
+                  'f2b02' = 'expenses',
+                  'f2a03a' = 'debt',
+                  'f2a17' = 'plant',
+                  'f2a18' = 'accumulated_depreciation',
+                  'f2c05' = 'funded_institutional_grants',
+                  'f2c06' = 'unfunded_institutional_grants',
+                  'f2c08' = 'tuition_fees_allowances',
+                  'f2c10' = 'discounts',
+                  'f2d01' = 'tuition_revenue',
+                  'f2e135' = 'depreciation',
+                  'f2h02' = 'endowment_eoy',
+                  'f1d01' = 'revenues',
+                  'f1d02' = 'expenses',
+                  'f1a07' = 'debt',
+                  'f1a27t4' = 'plant',
+                  'f1a284' = 'accumulated_depreciation',
+                  'f1e05' = 'funded_institutional_grants',
+                  'f1e06' = 'unfunded_institutional_grants',
+                  'f1e08' = 'tuition_fees_allowances',
+                  'f1e10' = 'discounts',
+                  'f1b01' = 'tuition_revenue',
+                  'f1c194' = 'depreciation',
+                  'f1c19dp' = 'depreciation',
+                  'f1h02' = 'endowment_eoy')]
+
+setkey(finance, year_key)
+setkey(gdp, year_key)
+finance <- gdp[finance, nomatch = NULL]
+finance[, amount := amount / gdp]
+finance <- dcast(finance,
+                 unitid + year_key + accounting_standard ~ field,
+                 value.var = 'amount')
+```
+
+# Fall Enrollment Data
+
+```{r}
+#| label: setup-enrollment
+fall_enrollment <- copy(years)[, data := map(year_key, fetch_fall_enrollment)]
+fall_enrollment <- unnest_dt(fall_enrollment, data, list(year_key))
+
+fall_enrollment <- merge.data.table(
+  x = institutions[,.(unitid, control, level)],
+  y = fall_enrollment,
+  by = 'unitid')
+
+fall_enrollment <- merge.data.table(
+  x = fall_enrollment,
+  y = weights,
+  by = c('time_status', 'career_level', 'control', 'level')
+  )
+
+rm(weights)
+
+fall_enrollment[, fte := headcount * weight]
+
+fall_enrollment <- fall_enrollment[
+  ,
+  .(first_time_fte = sum((continuation_type == 'First-time') *
+                           fte, na.rm = T),
+    full_time_fte = sum((time_status == 'Full-time') *
+                          fte, na.rm = T),
+    undergraduate_fte = sum((career_level == 'Undergraduate') *
+                              fte, na.rm = T),
+    degree_seeking_fte = sum((degree_seeking == 'Degree-seeking') *
+                               fte, na.rm = T),
+    total_enrollment = sum(headcount, na.rm = T),
+    total_fte = sum(fte, na.rm = T)),
+  by = .(unitid, year_key)]
+
+# collapse fall_enrollment to match financial submissions
+setkey(submissions, unitid, year_key)
+setkey(fall_enrollment, unitid, year_key)
+fall_enrollment <- fall_enrollment[submissions, nomatch = NULL]
+fall_enrollment <- fall_enrollment[
+  ,
+  .(first_time_fte = sum(first_time_fte, na.rm = T),
+    full_time_fte = sum(full_time_fte, na.rm = T),
+    undergraduate_fte = sum(undergraduate_fte, na.rm = T),
+    degree_seeking_fte = sum(degree_seeking_fte, na.rm = T),
+    total_enrollment = sum(total_enrollment, na.rm = T),
+    total_fte = sum(total_fte, na.rm = T)),
+  by = .(year_key,
+         unitid = parent_id)
+  ]
+```
+
+# Student Aid Data
+
+```{r}
+#| label: setup-aid
+
+student_aid <- copy(years)[, data := map(year_key, fetch_student_aid)]
+student_aid <- unnest_dt(student_aid, data, list(year_key))
+setkey(student_aid, unitid, year_key)
+student_aid <- student_aid[submissions, nomatch = NULL]
+
+setkey(student_aid, year_key)
+student_aid <- gdp[student_aid, nomatch = NULL]
+student_aid[, value := value / gdp]
+student_aid <- dcast(student_aid,
+                     unitid + parent_id + year_key ~ field,
+                     value.var = 'value')
+
+rm(gdp)
+
+student_aid[, `:=`(agrnt_t = as.integer(agrnt_t),
+                   igrnt_t = as.integer(igrnt_t),
+                   igrnt_p = igrnt_p / 100,
+                   pgrnt_p = pgrnt_p / 100,
+                   igrnt_n = as.integer(igrnt_n),
+                   pgrnt_n = as.integer(pgrnt_n),
+                   loan_a = as.integer(loan_a),
+                   loan_p = loan_p / 100,
+                   loan_n = as.integer(loan_n))]
+
+student_aid[, loan_a := loan_a * loan_n]
+student_aid[, loan_tot := loan_n / loan_p]
+student_aid[, ig_tot := igrnt_n / igrnt_p]
+student_aid[, pell_tot := pgrnt_n / pgrnt_p]
+
+student_aid <- student_aid[
+  ,
+  .(total_grant_aid = sum(agrnt_t, na.rm = T),
+    inst_grant_aid = sum(igrnt_t, na.rm = T),
+    pct_inst_grant_aided = sum(igrnt_n, na.rm = T) / sum(ig_tot, na.rm = T),
+    pct_pell_aided = sum(pgrnt_n, na.rm = T) / sum(pell_tot, na.rm = T),
+    total_loan_amount = sum(loan_a, na.rm = T) / sum(loan_n, na.rm = T),
+    pct_with_loans = sum(loan_n, na.rm = T) / sum(loan_tot, na.rm = T)),
+  by = .(unitid = parent_id, year_key)]
+```
+
+# Retention Data
+
+```{r}
+#| label: setup-retention
+
+retention <- copy(years)[, data := map(year_key, fetch_retention)]
+retention <- unnest_dt(retention, data, list(year_key))
+setkey(retention, unitid, year_key)
+retention <- retention[submissions, nomatch = NULL]
+retention <- retention[
+  ,
+  .(ft_retention_rate = mean(ft_retention_rate, na.rm = T),
+    pt_retention_rate = mean(pt_retention_rate, na.rm = T)),
+  by = .(unitid = parent_id, year_key)]
+```
+
+# Merge and Save
+
+```{r}
+#| label: setup-df
+
+df <- merge.data.table(
+  x = institutions,
+  y = fall_enrollment,
+  by = 'unitid'
+  )
+
+df <- merge.data.table(
+  x = df,
+  y = retention,
+  by = c('unitid', 'year_key'),
+  all.x = T
+  )
+
+df <- merge.data.table(
+  x = df,
+  y = finance,
+  by = c('unitid', 'year_key'),
+  all.x = T
+  )
+
+df <- merge.data.table(
+  x = df,
+  y = student_aid,
+  by = c('unitid', 'year_key'),
+  all.x = T
+  )
+
+institutions <- institutions[order(institution_name)]
+
+df[, Institution := factor(unitid,
+                           institutions$unitid,
+                           institutions$institution_name)]
+df[, Year := factor(year_key,
+                    years$year_key)]
+
+df[, `Fiscal Year` := factor(year_key,
+                             years$year_key,
+                             years$`Fiscal Year`)]
+
+saveRDS(df, 'data/ipeds_summary_data.rds')
+
+df
+```
