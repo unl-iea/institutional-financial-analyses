@@ -18,12 +18,9 @@ editor: source
 ```{r setup}
 #| label: load-packages
 #| include: false
-library(purrr, warn.conflicts = F)
 library(glue, warn.conflicts = F)
-library(janitor, warn.conflicts = F)
 library(lubridate, warn.conflicts = F)
 library(ggbeeswarm, warn.conflicts = F)
-library(knitr, warn.conflicts = F)
 library(kableExtra, warn.conflicts = F)
 library(formattable, warn.conflicts = F)
 library(data.table, warn.conflicts = F)
@@ -36,43 +33,6 @@ options(dplyr.summarise.inform = FALSE)
 # set random seed
 set.seed(1965)
 
-# include user functions
-source(file = "user_functions.R")
-```
-
-
-```{r}
-#| label: local-functions
-#| include: false
-
-# create year keys for fetching data
-fetch_years <- function(window_years = 10) {
-# set constants
-  last_year <- ifelse(month(today()) > 9,
-                        year(today()) - 1,
-                        year(today()) - 2)
-  
-  # base tibble used for all data pulls
-  # because the window includes the final year, it must be offset by one
-  years <- data.table(year_key = seq(last_year - window_years + 1, last_year))
-  years[, `Fiscal Year` := paste(year_key - 1, year_key, sep = '-')]
-  return(years)
-}
-
-
-fetch_gdp <- function(years) {
-  gdp <-
-    fread('https://fred.stlouisfed.org/graph/fredgraph.csv?id=GDPDEF',
-          colClasses = 'character',
-          strip.white = T) |>
-    clean_names()
-  
-  gdp[, date := as_date(date)]
-  
-  gdp[month(date) == 4,
-      .(year_key = ifelse(month(date) > 6, year(date) + 1, year(date)),
-        gdp = as.double(gdpdef) / 100)][year_key %in% years]
-}
 
 table_me <- function(df) {
   df |>
@@ -80,286 +40,21 @@ table_me <- function(df) {
     kable_paper(c('condensed', 'hover'), full_width = F, position = 'center')
 }
 
-unnest_dt <- function(dt, col, id = list(year_key)){
-  stopifnot(is.data.table(dt))
-  
-  by <- substitute(id)
-  col <- substitute(unlist(col, recursive = F))
-  
-  dt[, eval(col), by = eval(by)]
-}
 
-fetch_hd <- function(year_key) {
-  inst <- load_hd(year_key)[iclevel == 1 & obereg < 9 & opeflag == 1 &
-                              deggrant == 1 & act == 'A' & control %in% 1:2]
-  ic <- load_ic(year_key)[distnced == 2 & ft_ug == 1, .(unitid)]
-  setkey(inst, unitid)
-  setkey(ic, unitid)
-  ic[inst, nomatch = NULL][,
-           .(unitid, institution_name = instnm,  state = stabbr, fips, control,
-             level = iclevel, longitude = longitud, latitude)]
-}
+# include user functions
+df <- readRDS('data/ipeds_summary_data.rds')
 
-fetch_fall_enrollment <- function(year_key) {
-  melt(load_fall_enrollment(year_key),
-       id.vars = c('unitid', 'time_status', 'career_level',
-                   'degree_seeking', 'continuation_type'),
-       measure = patterns("^ef"),
-       na.rm = T,
-       variable.factor = F,
-       value.name = 'headcount')
-}
+df[,
+   `:=`(age = accumulated_depreciation / depreciation)]
+df[depreciation <= 0 | depreciation <= 0, age := NA]
 
-
-fetch_student_aid <- function(year_key) {
-  df <- load_sfa(year_key)
-  df[field %in% c('agrnt_t', 'igrnt_t', 'igrnt_p', 'igrnt_n', 'pgrnt_n',
-                  'loan_p', 'loan_a', 'loan_n', 'pgrnt_p')]
-}
-
-fetch_submissions <- function(year_key) {
-  load_submissions(year_key)[
-    ,
-    .(unitid,
-      parent_id = ifelse(prch_f %in% c('1', '2', '3'), idx_f, unitid))]
-}
-
-fetch_retention <- function(year_key) {
-  df <- load_retention(year_key)
-  df[, .(unitid,
-         ft_retention_rate = ret_pcf / 100,
-         pt_retention_rate = ret_pcp / 100)]
-}
-
-fetch_charges <- function(year_key) {
-  df <- load_charges(year_key)[field %in% c('tuition2', 'tuition3')]
-  df <- dcast(df,
-              unitid ~ field,
-              value.var = 'value')
-  df[,
-     .(unitid,
-       in_state_tuition = tuition2,
-       out_of_state_tuition = tuition3)]
-}
-
-fetch_finance <- function(year_key) {
-  fasb <- load_fasb(year_key)
-  fasb[, amount := as.double(amount)]
-  fasb[, accounting_standard := 'FASB']
-
-  gasb <- load_gasb(year_key)
-  gasb[, amount := as.double(amount)]
-  gasb[, accounting_standard := 'GASB']
-  
-  funion(fasb, gasb)
-}
-```
-
-## Data Sources
-
-The underlying data for this presentation comes from various public sources:
-
-- *GDP*: Gross Domestic Product from the Federal Reserve
-- *Fall Enrollment*: IPEDS Fall Enrollment (EF) Survey, Part A
-- *Fall Enrollment by State*: IPEDS Fall Enrollment (EF) Survey, Part C
-_ *First-year Retention*: IPEDS Fall Enrollment (EF) Survey, Part D
-
-```{r}
-#| label: load-general-data
-#| include: false
-# EF headcount FTE weights
-# see 'Calculation of FTE students (using fall student heacounts) in
-#    https://surveys.nces.ed.gov/ipeds/VisGlossaryAll.aspx
-weights <- data.table(time_status = rep(c('Full-time', 'Part-time'),
-                                        times = 1, each = 24),
-                      career_level = rep(c('Undergraduate', 'Graduate'),
-                                         times = 6, each = 4),
-                      control = rep(1:3,
-                                    times = 2, each = 8),
-                      level = c(1, 2, 3, -3),
-                      weight = c(rep(1, 24),
-                                 c(0.403543, 0.335737, 0.335737, 0.382059,
-                                   0.361702, 0.335737, 0.335737, 0.335737,
-                                   0.392857, 0.335737, 0.335737, 0.335737,
-                                   0.382059, 0.335737, 0.335737, 0.335737,
-                                   0.392857, 0.335737, 0.335737, 0.335737,
-                                   0.382059, 0.335737, 0.335737, 0.335737))
-                      )
-years <- fetch_years(10)
-gdp <- fetch_gdp(years$year_key)
-submissions <- copy(years)[, data := map(year_key, fetch_submissions)]
-submissions <- unnest_dt(submissions, data, list(year_key))
-```
-
-```{r}
-#| label: setup-institutions
-
-institutions <- copy(years)[, data := map(year_key, fetch_hd)]
-institutions <- unnest_dt(institutions, data, list(year_key))
-# retrieve last institutional record
-institutions <- institutions[
-  ,
-  .(year_key = max(year_key)),
-  by = unitid][institutions,
-               nomatch = NULL,
-               on = .(unitid, year_key)][, year_key := NULL]
-```
-
-```{r}
-#| label: setup-finance
-finance <- copy(years)[, data := map(year_key, fetch_finance)]
-finance <- unnest_dt(finance, data, list(year_key))
-
-finance <- finance[field %in% c('f2b01', 'f2b02', 'f2d01', 'f2a03a', 'f2a17',
-                                'f2a18', 'f2c05', 'f2c06', 'f2c08', 'f2c10',
-                                'f2d01', 'f2e135', 'f2h02', 'f1d01', 'f1d02',
-                                'f1a07', 'f1a27t4', 'f1a284', 'f1e05', 'f1e06',
-                                'f1e08', 'f1e10', 'f1b01', 'f1c194', 'f1c19dp', 
-                                'f1h02')]
-finance <- finance[
-  ,
-  field := recode(field,
-                  'f2b01' = 'revenues',
-                  'f2b02' = 'expenses',
-                  'f2a03a' = 'debt',
-                  'f2a17' = 'plant',
-                  'f2a18' = 'accumulated_depreciation',
-                  'f2c05' = 'funded_institutional_grants',
-                  'f2c06' = 'unfunded_institutional_grants',
-                  'f2c08' = 'tuition_fees_allowances',
-                  'f2c10' = 'discounts',
-                  'f2d01' = 'tuition_revenue',
-                  'f2e135' = 'depreciation',
-                  'f2h02' = 'endowment_eoy',
-                  'f1d01' = 'revenues',
-                  'f1d02' = 'expenses',
-                  'f1a07' = 'debt',
-                  'f1a27t4' = 'plant',
-                  'f1a284' = 'accumulated_depreciation',
-                  'f1e05' = 'funded_institutional_grants',
-                  'f1e06' = 'unfunded_institutional_grants',
-                  'f1e08' = 'tuition_fees_allowances',
-                  'f1e10' = 'discounts',
-                  'f1b01' = 'tuition_revenue',
-                  'f1c194' = 'depreciation',
-                  'f1c19dp' = 'depreciation',
-                  'f1h02' = 'endowment_eoy')]
-
-setkey(finance, year_key)
-setkey(gdp, year_key)
-finance <- gdp[finance, nomatch = NULL]
-finance[, amount := amount / gdp]
-finance <- dcast(finance,
-                 unitid + year_key + accounting_standard ~ field,
-                 value.var = 'amount')
-```
-
-```{r}
-#| label: setup-enrollment
-fall_enrollment <- copy(years)[, data := map(year_key, fetch_fall_enrollment)]
-fall_enrollment <- unnest_dt(fall_enrollment, data, list(year_key))
-
-fall_enrollment <- merge.data.table(
-  x = institutions[,.(unitid, control, level)],
-  y = fall_enrollment,
-  by = 'unitid')
-
-fall_enrollment <- merge.data.table(
-  x = fall_enrollment,
-  y = weights,
-  by = c('time_status', 'career_level', 'control', 'level')
-  )
-
-rm(weights)
-
-fall_enrollment[, fte := headcount * weight]
-
-fall_enrollment <- fall_enrollment[
-  ,
-  .(first_time_fte = sum((continuation_type == 'First-time') *
-                           fte, na.rm = T),
-    full_time_fte = sum((time_status == 'Full-time') *
-                          fte, na.rm = T),
-    undergraduate_fte = sum((career_level == 'Undergraduate') *
-                              fte, na.rm = T),
-    degree_seeking_fte = sum((degree_seeking == 'Degree-seeking') *
-                               fte, na.rm = T),
-    total_enrollment = sum(headcount, na.rm = T),
-    total_fte = sum(fte, na.rm = T)),
-  by = .(unitid, year_key)]
-
-# collapse fall_enrollment to match financial submissions
-setkey(submissions, unitid, year_key)
-setkey(fall_enrollment, unitid, year_key)
-fall_enrollment <- fall_enrollment[submissions, nomatch = NULL]
-fall_enrollment <- fall_enrollment[
-  ,
-  .(first_time_fte = sum(first_time_fte, na.rm = T),
-    full_time_fte = sum(full_time_fte, na.rm = T),
-    undergraduate_fte = sum(undergraduate_fte, na.rm = T),
-    degree_seeking_fte = sum(degree_seeking_fte, na.rm = T),
-    total_enrollment = sum(total_enrollment, na.rm = T),
-    total_fte = sum(total_fte, na.rm = T)),
-  by = .(year_key,
-         unitid = parent_id)
-  ]
-```
-
-```{r}
-#| label: setup-aid
-
-student_aid <- copy(years)[, data := map(year_key, fetch_student_aid)]
-student_aid <- unnest_dt(student_aid, data, list(year_key))
-setkey(student_aid, unitid, year_key)
-student_aid <- student_aid[submissions, nomatch = NULL]
-
-setkey(student_aid, year_key)
-student_aid <- gdp[student_aid, nomatch = NULL]
-student_aid[, value := value / gdp]
-student_aid <- dcast(student_aid,
-                     unitid + parent_id + year_key ~ field,
-                     value.var = 'value')
-
-rm(gdp)
-
-student_aid[, `:=`(agrnt_t = as.integer(agrnt_t),
-                   igrnt_t = as.integer(igrnt_t),
-                   igrnt_p = igrnt_p / 100,
-                   pgrnt_p = pgrnt_p / 100,
-                   igrnt_n = as.integer(igrnt_n),
-                   pgrnt_n = as.integer(pgrnt_n),
-                   loan_a = as.integer(loan_a),
-                   loan_p = loan_p / 100,
-                   loan_n = as.integer(loan_n))]
-
-student_aid[, loan_a := loan_a * loan_n]
-student_aid[, loan_tot := loan_n / loan_p]
-student_aid[, ig_tot := igrnt_n / igrnt_p]
-student_aid[, pell_tot := pgrnt_n / pgrnt_p]
-
-student_aid <- student_aid[
-  ,
-  .(total_grant_aid = sum(agrnt_t, na.rm = T),
-    inst_grant_aid = sum(igrnt_t, na.rm = T),
-    pct_inst_grant_aided = sum(igrnt_n, na.rm = T) / sum(ig_tot, na.rm = T),
-    pct_pell_aided = sum(pgrnt_n, na.rm = T) / sum(pell_tot, na.rm = T),
-    total_loan_amount = sum(loan_a, na.rm = T) / sum(loan_n, na.rm = T),
-    pct_with_loans = sum(loan_n, na.rm = T) / sum(loan_tot, na.rm = T)),
-  by = .(unitid = parent_id, year_key)]
-```
-
-```{r}
-#| label: setup-retention
-
-retention <- copy(years)[, data := map(year_key, fetch_retention)]
-retention <- unnest_dt(retention, data, list(year_key))
-setkey(retention, unitid, year_key)
-retention <- retention[submissions, nomatch = NULL]
-retention <- retention[
-  ,
-  .(ft_retention_rate = mean(ft_retention_rate, na.rm = T),
-    pt_retention_rate = mean(pt_retention_rate, na.rm = T)),
-  by = .(unitid = parent_id, year_key)]
+df[, recent := 0]
+df[unitid %in% c(238430, 153621, 219295, 183822,
+                 115728, 172440, 189848, 201751),
+   closed := 1]
+df[unitid %in% c(238430, 153621, 219295, 183822,
+                 115728, 172440, 189848, 201751),
+   recent := 1]
 ```
 
 ## Years Covered
@@ -371,9 +66,10 @@ For IPEDS Survey components, fiscal years and term data (e.g., Fall Enrollment) 
 ::: {style="font-size: 0.75em"}
 ```{r}
 #| label: show-years
-years |>
-  mutate(`Term Data` = paste0('Fall ', year_key)) |>
-  rename(`Collection Year` = year_key) |>
+df |>
+  distinct(Year) |>
+  mutate(`Term Data` = paste0('Fall ', Year)) |>
+  rename(`Collection Year` = Year) |>
   table_me()
 ```
 :::
@@ -381,101 +77,68 @@ years |>
 ## First-time Enrollment
 
 ```{r}
-fall_enrollment |>
+df |>
   filter(unitid %in% c(238430, 153621, 181020)) |>
-  mutate(unitid = factor(unitid,
-                         levels = c(238430, 153621, 181020, 186131, 170976,
-                                    181464),
-                         labels = c('Cardinal Stritch', 'Iowa Wesleyan',
-                                    'Doane', 'Princeton', 'Michigan', 'UNL')),
-         year_key = factor(year_key)) |>
-  ggplot(aes(x = year_key, y = first_time_fte, group = unitid,
-             color = unitid, linetype = unitid, shape = unitid)) +
+  ggplot(aes(x = Year, y = first_time_fte, group = Institution,
+             color = Institution, linetype = Institution,
+             shape = Institution)) +
   geom_point() +
   geom_line() +
-  scale_y_continuous(labels = scales::number_format()) +
+  scale_y_continuous(labels = scales::number_format(big.mark = ",")) +
   labs(title = 'First-time Enrollment Last 10 Years',
        subtitle = 'Fall BOT',
        x = 'Fall',
-       y = 'FTE',
-       color = 'Institution',
-       linetype = 'Institution',
-       shape = 'Institution')
+       y = 'FTE')
 ```
 
 ## Total Enrollment
 
 ```{r}
-fall_enrollment |>
-  filter(unitid %in% c(238430, 153621, 181020)) |>
-  mutate(unitid = factor(unitid,
-                         levels = c(238430, 153621, 181020, 186131, 170976, 181464),
-                         labels = c('Cardinal Stritch', 'Iowa Wesleyan',
-                                    'Doane', 'Princeton', 'Michigan', 'UNL')),
-         year_key = factor(year_key)) |>
-  ggplot(aes(x = year_key, y = total_fte, group = unitid,
-             color = unitid, linetype = unitid, shape = unitid)) +
+df |>
+  filter(unitid %in% c(181394, 238430, 153621, 181020)) |>
+  ggplot(aes(x = Year, y = total_fte, group = Institution,
+             color = Institution, linetype = Institution)) +
   geom_point() +
   geom_line() +
-  scale_y_continuous(labels = scales::number_format()) +
+  scale_y_continuous(labels = scales::number_format(big.mark = ",")) +
   labs(title = 'Total Enrollment Last 10 Years',
        subtitle = 'Fall BOT',
        x = 'Fall',
-       y = 'FTE',
-       color = 'Institution',
-       linetype = 'Institution',
-       shape = 'Institution')
+       y = 'FTE')
 ```
 
 ## Degree-Seeking Enrollment
 
 ```{r}
-fall_enrollment |>
-  filter(unitid %in% c(238430, 153621, 181020)) |>
-  mutate(unitid = factor(unitid,
-                         levels = c(238430, 153621, 181020, 186131, 170976,
-                                    181464),
-                         labels = c('Cardinal Stritch', 'Iowa Wesleyan',
-                                    'Doane', 'Princeton', 'Michigan', 'UNL')),
-         year_key = factor(year_key),
-         ft_pct = first_time_fte / degree_seeking_fte) |>
-  ggplot(aes(x = year_key, y = ft_pct, group = unitid,
-             color = unitid, linetype = unitid, shape = unitid)) +
+df |>
+  filter(unitid %in% c(181394, 238430, 153621, 181020)) |>
+  mutate(ft_pct = first_time_fte / degree_seeking_fte) |>
+  ggplot(aes(x = Year, y = ft_pct, group = Institution,
+             color = Institution, linetype = Institution, shape = Institution)) +
   geom_point() +
   geom_line() +
   scale_y_continuous(labels = scales::percent_format()) +
   labs(title = 'First-time as a Percentage of Degree-seeking Enrollment Last 10 Years',
        subtitle = 'Fall BOT',
        x = 'Fall',
-       y = 'Percentage of Degree-seeking',
-       color = 'Institution',
-       linetype = 'Institution',
-       shape = 'Institution')
+       y = 'Percentage of Degree-seeking')
 ```
 
 ## Deferred Mainenance
 
 ```{r}
-finance |>
+df |>
   filter(unitid %in% c(238430, 153621, 181020, 186131, 170976, 181464)) |>
-  mutate(unitid = factor(unitid,
-                         levels = c(238430, 153621, 181020, 186131, 170976, 181464),
-                         labels = c('Cardinal Stritch', 'Iowa Wesleyan',
-                                    'Doane', 'Princeton', 'Michigan', 'UNL')),
-         year_key = factor(year_key),
-         age = accumulated_depreciation / depreciation) |>
-  ggplot(aes(x = year_key, y = age, group = unitid, color = unitid,
-             linetype = unitid, shape = unitid)) +
+  ggplot(aes(x = `Fiscal Year`, y = age, group = Institution,
+             color = Institution, linetype = Institution,
+             shape = Institution)) +
   geom_point() +
   geom_line() +
   geom_hline(yintercept = 15, color = 'darkgray', linetype = 'dashed') +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) +
   labs(title = 'Age of Plant Last 10 Years',
        subtitle = ' Age = accumulated depreciation / annual depreciation',
-       x = 'Fiscal Year Ending',
        y = 'Age of Plant (years)',
-       color = 'Institution',
-       linetype = 'Institution',
-       shape = 'Institution',
        caption = 'All figures adjusted for inflation using April GDP.')
 ```
 
@@ -483,82 +146,94 @@ finance |>
 For reference, I added Princeton and Michigan as Private and Public "healthy" comparators and UNL for internal interest.  Based on the limited institutional selections, there looks to be a gap between the two fallen institutions and all others in FY2012.  Their plants were 15 years old whereas all others fell around 10 years, suggesting that deferred maintenance was already a problem.  I don't know if there is anything important about the 15-year "barrier," but I've placed a reference line and you can see that Doane has crept above it.
 :::
 
+## Closed vs. Not Closed
+
+```{r}
+df[
+  year_key == max(year_key) & total_fte < 2000 & !is.na(age),
+  .(Institution,
+    closed,
+    state,
+    age,
+    total_fte,
+    first_time_fte)][
+      age >= 15 & state %in% c('SD', 'NE', 'KS', 'IA', 'MO')][
+        order(-closed, Institution)
+      ]
+```
+
+```{r}
+df |>
+  mutate(age = accumulated_depreciation / depreciation,
+         Closure = factor(closed, 0:1, c('Others', 'Closure'))) |>
+  filter(recent == 1 | age >= 15) |>
+  filter(year_key == max(year_key)) |>
+  select(institution_name, state, closed, age, total_fte, first_time_fte) |>
+  arrange(-closed, institution_name)
+```
+
 ## Debt
 
 ```{r}
-finance |>
+df |>
   filter(unitid %in% c(238430, 153621, 181020)) |>
-  mutate(unitid = factor(unitid,
-                         levels = c(238430, 153621, 181020, 186131, 170976, 181464),
-                         labels = c('Cardinal Stritch', 'Iowa Wesleyan',
-                                    'Doane', 'Princeton', 'Michigan', 'UNL')),
-         year_key = factor(year_key),
-         debt = debt / 1000) |>
-  ggplot(aes(x = year_key, y = debt, group = unitid, color = unitid,
-             linetype = unitid, shape = unitid)) +
+  mutate(Debt = debt / total_fte) |>
+  ggplot(aes(x = `Fiscal Year`, y = Debt, group = Institution,
+             color = Institution, linetype = Institution,
+             shape = Institution)) +
   geom_point() +
   geom_line() +
-  scale_y_continuous(labels = scales::dollar_format()) +
-  labs(title = 'Debt Last 10 Years',
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) +
+  scale_y_continuous(labels = scales::dollar_format(scale = 0.001,
+                                                    suffix = 'K',
+                                                    big.mark = ',')) +
+  labs(title = 'Debt per FTE',
        subtitle = '',
        x = 'Fiscal Year Ending',
-       y = 'Debt ($000)',
-       color = 'Institution',
-       linetype = 'Institution',
-       shape = 'Institution',
+       y = 'Debt per FTE',
        caption = 'All figures adjusted for inflation using April GDP.')
 ```
 
 ## Unfunded Grant Aid
 
 ```{r}
-finance |>
+df |>
   filter(unitid %in% c(238430, 153621, 181020)) |>
-  mutate(unitid = factor(unitid,
-                         levels = c(238430, 153621, 181020, 186131, 170976, 181464),
-                         labels = c('Cardinal Stritch', 'Iowa Wesleyan',
-                                    'Doane', 'Princeton', 'Michigan', 'UNL')),
-         year_key = factor(year_key),
-         unfunded_institutional_grants = unfunded_institutional_grants / 1000) |>
-  ggplot(aes(x = year_key, y = unfunded_institutional_grants, group = unitid,
-             color = unitid, linetype = unitid, shape = unitid)) +
+  mutate(igrant = unfunded_institutional_grants / total_fte) |>
+  ggplot(aes(x = `Fiscal Year`, y = igrant,
+             group = Institution, color = Institution, linetype = Institution,
+             shape = Institution)) +
   geom_point() +
   geom_line() +
-  scale_y_continuous(labels = scales::dollar_format()) +
-  labs(title = 'Unfunded Grant Aid (Total)',
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) +
+  scale_y_continuous(labels = scales::dollar_format(scale = 0.001,
+                                                    suffix = 'K',
+                                                    big.mark = ',')) +
+  labs(title = 'Unfunded Grant Aid per FTE',
        subtitle = '',
        x = 'Fiscal Year Ending',
-       y = 'Aid ($000)',
-       color = 'Institution',
-       linetype = 'Institution',
-       shape = 'Institution',
+       y = 'Aid per FTE',
        caption = 'All figures adjusted for inflation using April GDP.')
 ```
 
 ## Unfunded Institutional Aid As Percentage of Institutional Aid
 
 ```{r}
-finance |>
+df |>
   filter(unitid %in% c(238430, 153621, 181020)) |>
-  mutate(unitid = factor(unitid,
-                         levels = c(238430, 153621, 181020, 186131, 170976, 181464),
-                         labels = c('Cardinal Stritch', 'Iowa Wesleyan',
-                                    'Doane', 'Princeton', 'Michigan', 'UNL')),
-         year_key = factor(year_key),
-         pct = unfunded_institutional_grants / (unfunded_institutional_grants +
+  mutate(pct = unfunded_institutional_grants / (unfunded_institutional_grants +
                                                   funded_institutional_grants)) |>
-  ggplot(aes(x = year_key, y = pct, group = unitid, color = unitid,
-             linetype = unitid, shape = unitid)) +
+  ggplot(aes(x = `Fiscal Year`, y = pct, group = Institution,
+             color = Institution, linetype = Institution,
+             shape = Institution)) +
   geom_point() +
   geom_line() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) +
   scale_y_continuous(labels = scales::percent_format()) +
   labs(title = 'Unfunded Grants as a Percentage of Institutional Grants',
        subtitle = '',
        x = 'Fiscal Year Ending',
-       y = 'Debt ($000)',
-       color = 'Institution',
-       linetype = 'Institution',
-       shape = 'Institution')
+       y = 'Percentage')
 ```
 
 ::: {style="font-size: 0.45em"}
@@ -568,110 +243,114 @@ Although Iowa Wesleyan looked to have reasonable incoming enrollments compared t
 ## Retention Rate
 
 ```{r}
-retention |>
+df |>
   filter(unitid %in% c(238430, 153621, 181020, 186131, 170976, 181464)) |>
-  mutate(unitid = factor(unitid,
-                         levels = c(238430, 153621, 181020, 186131, 170976,
-                                    181464),
-                         labels = c('Cardinal Stritch', 'Iowa Wesleyan',
-                                    'Doane', 'Princeton', 'Michigan', 'UNL')),
-         year_key = factor(year_key)) |>
-  ggplot(aes(x = year_key, y = ft_retention_rate, group = unitid, color = unitid,
-             linetype = unitid, shape = unitid)) +
+  ggplot(aes(x = Year, y = ft_retention_rate, group = Institution,
+             color = Institution, linetype = Institution,
+             shape = Institution)) +
   geom_point() +
   geom_line() +
   scale_y_continuous(labels = scales::percent_format()) +
   labs(title = 'Retention Rate',
        subtitle = 'Fall BOT',
        x = 'Fall',
-       y = 'Rate',
-       color = 'Institution',
-       linetype = 'Institution',
-       shape = 'Institution')
+       y = 'Rate')
 ```
 
 ## Percentage of Student with Institutional Grants
 
 ```{r}
-student_aid |>
+df |>
   filter(unitid %in% c(238430, 153621, 181020, 186131, 170976, 181464)) |>
-  mutate(unitid = factor(unitid,
-                         levels = c(238430, 153621, 181020, 186131, 170976,
-                                    181464),
-                         labels = c('Cardinal Stritch', 'Iowa Wesleyan',
-                                    'Doane', 'Princeton', 'Michigan', 'UNL')),
-         year_key = factor(year_key)) |>
-  ggplot(aes(x = year_key, y = pct_inst_grant_aided, group = unitid,
-             color = unitid, linetype = unitid, shape = unitid)) +
+  ggplot(aes(x = `Fiscal Year`, y = pct_inst_grant_aided, group = Institution,
+             color = Institution, linetype = Institution,
+             shape = Institution)) +
   geom_point() +
   geom_line() +
   scale_y_continuous(labels = scales::percent_format()) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) +
   labs(title = 'Percentage of FTFT with Institutional Grants',
        subtitle = 'by Fiscal Year',
        x = 'Fiscal Year',
-       y = 'Percentage',
-       color = 'Institution',
-       linetype = 'Institution',
-       shape = 'Institution')
+       y = 'Percentage')
 ```
 
 ## Percentage of Students With Loans
-
-student_aid <- student_aid[
-  ,
-  .(total_grant_aid = sum(agrnt_t, na.rm = T),
-    inst_grant_aid = sum(igrnt_t, na.rm = T),
-    pct_inst_grant_aided = sum(igrnt_n, na.rm = T) / sum(ig_tot, na.rm = T),
-    pct_pell_aided = sum(pgrnt_n, na.rm = T) / sum(pell_tot, na.rm = T),
-    total_loan_amount = sum(loan_a, na.rm = T) / sum(loan_n, na.rm = T),
-    pct_with_loans = sum(loan_n, na.rm = T) / sum(loan_tot, na.rm = T)),
-  by = .(unitid = parent_id, year_key)]
   
 ```{r}
-student_aid |>
+df |>
   filter(unitid %in% c(238430, 153621, 181020, 186131, 170976, 181464)) |>
-  mutate(unitid = factor(unitid,
-                         levels = c(238430, 153621, 181020, 186131, 170976,
-                                    181464),
-                         labels = c('Cardinal Stritch', 'Iowa Wesleyan',
-                                    'Doane', 'Princeton', 'Michigan', 'UNL')),
-         year_key = factor(year_key)) |>
-  ggplot(aes(x = year_key, y = pct_with_loans, group = unitid, color = unitid,
-             linetype = unitid, shape = unitid)) +
+  ggplot(aes(x = `Fiscal Year`, y = pct_with_loans, group = Institution,
+             color = Institution, linetype = Institution,
+             shape = Institution)) +
   geom_point() +
   geom_line() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) +
   scale_y_continuous(labels = scales::percent_format()) +
   labs(title = 'Percentage of FTFT with Loans',
        subtitle = 'by Fiscal Year',
        x = 'Fiscal Year',
-       y = 'Percentage',
-       color = 'Institution',
-       linetype = 'Institution',
-       shape = 'Institution')
+       y = 'Percentage')
 ```
 
 ## Average Loan Amount
 
 ```{r}
-student_aid |>
+df |>
   filter(unitid %in% c(238430, 153621, 181020, 186131, 170976, 181464)) |>
-  mutate(unitid = factor(unitid,
-                         levels = c(238430, 153621, 181020, 186131, 170976,
-                                    181464),
-                         labels = c('Cardinal Stritch', 'Iowa Wesleyan',
-                                    'Doane', 'Princeton', 'Michigan', 'UNL')),
-         year_key = factor(year_key)) |>
-  ggplot(aes(x = year_key, y = total_loan_amount, group = unitid, color = unitid,
-             linetype = unitid, shape = unitid)) +
+  ggplot(aes(x = `Fiscal Year`, y = total_loan_amount, group = Institution,
+             color = Institution, linetype = Institution,
+             shape = Institution)) +
   geom_point() +
   geom_line() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) +
   scale_y_continuous(labels = scales::dollar_format()) +
   labs(title = 'Average Student Loan',
        subtitle = 'by Fiscal Year',
        x = 'Fiscal Year',
        y = 'Average Loan',
-       color = 'Institution',
-       linetype = 'Institution',
-       shape = 'Institution',
        caption = 'All figures adjusted for inflation using April GDP.')
 ```
+
+
+```{r}
+df_2 <- df[,
+           .(unitid,
+             year_key,
+             total_fte,
+             age = accumulated_depreciation / depreciation,
+             pct = unfunded_institutional_grants /
+               (unfunded_institutional_grants +
+                  funded_institutional_grants),
+             ft_retention_rate)]
+
+df_2 <- df_2[is.finite(rowSums(df_2))]
+
+scale_vars <- c('total_fte',
+                'age',
+                'pct',
+                'ft_retention_rate')
+
+df_2[, (scale_vars) := lapply(.SD, scale), .SDcols = scale_vars]
+
+d <- dist(df_2[, ..scale_vars], method = 'euclidean')
+
+fit <- hclust(d, method = 'ward')
+plot(fit)
+```
+
+```{r}
+# 2 cluster solution
+kfit2 <- kmeans(df_2[, ..scale_vars], 2)
+df_3 <- data.table(unitid = df_2$unitid,
+                   year_key = df_2$year_key,
+                   fit2 <- kfit2$cluster)
+merge.data.table(
+  x = df,
+  y = df_3,
+  by = c('unitid', 'year_key'),
+  all.x = T) |>
+  mutate(fit2 = factor(fit2, 1:2, c('cluster 1', 'cluster 2'))) |>
+  ggplot()
+```
+
