@@ -6,6 +6,10 @@ date: 2020-04-03
 output: 
   html_notebook:
     code_folding: show
+params:
+  year:
+    label: "Starting Year"
+    value: 2011
 ---
 
 ```{r setup}
