@@ -51,7 +51,7 @@ set.seed(1965)
 source(file = "user_functions.R")
 
 # set constants
-recent_year <- ifelse(month(today()) > 9,
+recent_year <- ifelse(month(today()) > 10,
                       year(today()) - 1,
                       year(today()) - 2)
 
